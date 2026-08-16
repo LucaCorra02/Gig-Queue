@@ -104,24 +104,17 @@ services:
       kafka-1: { condition: service_healthy }
       kafka-2: { condition: service_healthy }
       kafka-3: { condition: service_healthy }
-    entrypoint: [ "/bin/bash", "-c" ]
-    command: |
-      "
-      set -e
-      BS=kafka-1:9093
-      create() {
-        kafka-topics --bootstrap-server $$BS --create --if-not-exists \
-          --topic $$1 --partitions $$2 --replication-factor 3 \
-          --config min.insync.replicas=2
-      }
-      create topic-requests 3
-      create topic-orders   1
-      create topic-fraud    1
-      create topic-dlq      1
+    command:
+      - /bin/bash
+      - -c
+      - |
+        kafka-topics --bootstrap-server kafka-1:9093 --create --if-not-exists --topic topic-requests --partitions 3 --replication-factor 3 --config min.insync.replicas=2
+        kafka-topics --bootstrap-server kafka-1:9093 --create --if-not-exists --topic topic-orders --partitions 1 --replication-factor 3 --config min.insync.replicas=2
+        kafka-topics --bootstrap-server kafka-1:9093 --create --if-not-exists --topic topic-fraud --partitions 1 --replication-factor 3
+        kafka-topics --bootstrap-server kafka-1:9093 --create --if-not-exists --topic topic-dlq --partitions 1 --replication-factor 3
 
-      echo 'Cluster topics:'
-      kafka-topics --bootstrap-server $$BS --describe
-      "
+        echo "Cluster topics:"
+        kafka-topics --bootstrap-server kafka-1:9093 --list
     networks: [ gig-net ]
 
   redis:
