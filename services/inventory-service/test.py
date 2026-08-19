@@ -124,12 +124,39 @@ def test_no_oversell():
     assert seats_left(event) == 0
 
 
+def send_raw(event_id, payload_bytes): # write without using the API, to simulate a replay of the same order_id
+    producer = Producer({"bootstrap.servers": KAFKA, "acks": "all"})
+    producer.produce(topic=TOPIC_REQUESTS, key=event_id.encode(), value=payload_bytes)
+    producer.flush(10)
+
+def test_lua():
+    event = new_event(seats=10)
+    order_id = uuid.uuid4().hex
+    payload = json.dumps({
+        "order_id": order_id,
+        "event_id": event,
+        "user_id": "mario",
+        "ts_ms": int(time.time() * 1000),
+    }).encode()
+
+    send_raw(event, payload)
+    time.sleep(1)
+    first = seats_left(event)
+    send_raw(event, payload)
+    time.sleep(1)
+    second = seats_left(event)
+
+    assert first == 9, "seats = %" % first
+    assert second == 9, "seats = %" % second
+
+
 TESTS = [
     test_confirmed_order,
     test_rejected_order,
     test_multiple_orders,
     test_sold_out,
-    test_no_oversell
+    test_no_oversell,
+    test_lua,
 ]
 
 if __name__ == "__main__":
