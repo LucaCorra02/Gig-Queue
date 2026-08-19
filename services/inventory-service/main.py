@@ -4,6 +4,7 @@ import json
 import redis
 from confluent_kafka import Consumer, Producer
 from loguru import logger
+from pathlib import Path
 
 KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP", "localhost:9092")
 TOPIC_REQUESTS = os.getenv("TOPIC_REQUESTS", "topic-requests")
@@ -11,6 +12,7 @@ GROUP_ID = os.getenv("GROUP_ID", "group-inventory") # TODO: change to group-inve
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 SEATS_PER_EVENT = int(os.getenv("SEATS_PER_EVENT", "100")) # TODO: add some redis records for testing
 TOPIC_ORDERS = os.getenv("TOPIC_ORDERS", "topic-orders")
+DEDUP_TTL_S = int(os.getenv("DEDUP_TTL_S", "86400"))
 
 logger.remove()
 logger.add(sys.stderr, format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan> - <level>{message}</level>")
@@ -29,21 +31,17 @@ producer = Producer({
     "enable.idempotence": True,
 })
 
-def reserve(event_id):
-    seats_key = f"seats:{event_id}"
-    total_key = f"total:{event_id}"
+RESERVE = rdb.register_script(
+    (Path(__file__).parent / "reserve.lua").read_text(encoding="utf-8")
+)
 
-    if rdb.set(total_key, SEATS_PER_EVENT, nx=True):
-        rdb.set(seats_key, SEATS_PER_EVENT)
-
-    total = int(rdb.get(total_key))
-    remaining = rdb.decr(seats_key)
-
-    if remaining < 0:
-        rdb.incr(seats_key)
-        return None, 0
-
-    return total - remaining, remaining
+def reserve(order_id, event_id):
+    seat, remaining = RESERVE(
+        keys=[f"seats:{event_id}", f"total:{event_id}", f"processed:{order_id}"],
+        args=[SEATS_PER_EVENT, DEDUP_TTL_S],
+    )
+    if seat == -1: return None, 0
+    return seat, remaining
 
 delivery_errors = []
 
@@ -70,7 +68,7 @@ def read_from_topic():
                 logger.error(f"Error parsing message: {e}")
                 continue
             logger.info(f"Order {order_id[:8]}, events={event_id}, user={user_id}")
-            seat, seats_remaining = reserve(event_id)
+            seat, seats_remaining = reserve(order_id, event_id)
             if seat:
                 logger.success(f"Confirmed {order_id[:8]} seat={seat} remaining={seats_remaining}")
             else:
@@ -94,7 +92,7 @@ def read_from_topic():
             pending = producer.flush(10) # TODO: add batch processing to avoid waiting for each message
             if pending or delivery_errors:
                 logger.error(f"Result not committed ({delivery_errors})")
-                continue # TODO: Fix multiple decrease
+                break# TODO: Fix multiple decrease
             consumer.commit(message=msg, asynchronous=False)
             logger.info(f"Sent response for order {order_id[:8]} to topic {TOPIC_ORDERS}, {response['status']}, seat={response['seat']}, remaining={response['seats_remaining']}")
 
