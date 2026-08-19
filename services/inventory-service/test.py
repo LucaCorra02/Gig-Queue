@@ -98,12 +98,12 @@ def test_sold_out():
     order_ids = [buy(event, "user_%d" % i) for i in range(n_seats*2)]
 
     outcomes = wait_for_outcomes(order_ids)
-    assert len(outcomes) == n_seats*2, "trovati %d esiti su %d" % len(outcomes) % n_seats*2
+    assert len(outcomes) == n_seats*2, "trovati %d esiti su %d" % (len(outcomes), n_seats * 2)
     confirmed = [o for o in outcomes.values() if o["status"] == "confirmed"]
     rejected = [o for o in outcomes.values() if o["status"] == "rejected"]
 
-    assert len(confirmed) == 3, "confirmed %d instead of %d" % len(confirmed) % n_seats
-    assert len(rejected) == 3, "rejected %d instead of %d" % len(rejected) % n_seats
+    assert len(confirmed) == 3, "confirmed %d instead of %d" % (len(confirmed), n_seats)
+    assert len(rejected) == 3, "rejected %d instead of %d" % (len(rejected), n_seats)
     assert seats_left(event) == 0, "remaining %s" % seats_left(event)
 
     for outcome in rejected:
