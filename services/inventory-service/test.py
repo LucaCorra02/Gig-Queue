@@ -80,9 +80,40 @@ def test_rejected_order():
     assert outcome["seat"] is None, outcome
     assert outcome["seats_remaining"] == 0, outcome
 
+def test_multiple_orders():
+    n_events = 5
+    event = new_event(seats=n_events)
+    order_ids = [buy(event, "user_%d" % i) for i in range(n_events)]
+    assert n_events == len(order_ids)
+
+    outcomes = wait_for_outcomes(order_ids)
+    assert len(outcomes) == n_events, "not all orders processed"
+    seats = [outcomes[order_id]["seat"] for order_id in order_ids]
+    assert sorted(seats) == list(range(1, n_events + 1)), "seats not assigned correctly"
+    assert seats_left(event) == 0, "seats left should be 0"
+
+def test_sold_out():
+    n_seats = 3
+    event = new_event(seats=n_seats)
+    order_ids = [buy(event, "user_%d" % i) for i in range(n_seats*2)]
+
+    outcomes = wait_for_outcomes(order_ids)
+    assert len(outcomes) == n_seats*2, "trovati %d esiti su %d" % len(outcomes) % n_seats*2
+    confirmed = [o for o in outcomes.values() if o["status"] == "confirmed"]
+    rejected = [o for o in outcomes.values() if o["status"] == "rejected"]
+
+    assert len(confirmed) == 3, "confirmed %d instead of %d" % len(confirmed) % n_seats
+    assert len(rejected) == 3, "rejected %d instead of %d" % len(rejected) % n_seats
+    assert seats_left(event) == 0, "remaining %s" % seats_left(event)
+
+    for outcome in rejected:
+        assert outcome["seat"] is None, outcome
+
 TESTS = [
     test_confirmed_order,
-    test_rejected_order
+    test_rejected_order,
+    test_multiple_orders,
+    test_sold_out
 ]
 
 if __name__ == "__main__":
