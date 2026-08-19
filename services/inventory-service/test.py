@@ -109,11 +109,27 @@ def test_sold_out():
     for outcome in rejected:
         assert outcome["seat"] is None, outcome
 
+def test_no_oversell():
+    n_seats = 20
+    event = new_event(seats=n_seats)
+    order_ids = []
+    with ThreadPoolExecutor(max_workers=15) as pool:
+        order_ids = list(pool.map(lambda i: buy(event, "user_%d" % i), range(n_seats*2)))
+
+    outcomes = wait_for_outcomes(order_ids, timeout=60)
+    seats_confirmed = [o["seat"] for o in outcomes.values() if o["status"] == "confirmed"]
+    assert len(outcomes) == n_seats*2, "find %d response" % len(outcomes)
+    assert len(seats_confirmed) == n_seats, "confermid seats %d" % len(seats_confirmed)
+    assert sorted(seats_confirmed) == list(range(1, 21))
+    assert seats_left(event) == 0
+
+
 TESTS = [
     test_confirmed_order,
     test_rejected_order,
     test_multiple_orders,
-    test_sold_out
+    test_sold_out,
+    test_no_oversell
 ]
 
 if __name__ == "__main__":
