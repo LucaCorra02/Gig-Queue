@@ -23,8 +23,15 @@ def test_buy_ticket_empty_user():
     response = requests.post(f"{API_URL}/buy", json=payload)
     assert response.status_code == 422
 
+def test_health_check():
+    response = requests.get(f"{API_URL}/healthz")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "ok"
+
 if __name__ == "__main__":
     test_buy_ticket_success()
     test_buy_ticket_missing_event()
     test_buy_ticket_empty_user()
+    test_health_check()
     print("All tests passed")

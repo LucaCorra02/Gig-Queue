@@ -113,3 +113,11 @@ async def buy_ticket(body: BuyRequest, request: Request):
         partition=msg.partition(),
         offset=msg.offset()
     )
+
+@app.get("/healthz")
+async def healthz():
+    try:
+        await asyncio.to_thread(producer.list_topics, TOPIC_REQUESTS, 3.0)
+    except KafkaException:
+        raise HTTPException(status_code=503, detail="Kafka not reachable")
+    return {"status": "ok"}
