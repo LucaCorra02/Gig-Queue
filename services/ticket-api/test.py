@@ -1,6 +1,10 @@
 import requests
+import redis
+import time
 
 API_URL = "http://localhost:8080"
+REDIS_URL = "redis://localhost:6379/0"
+rdb = redis.from_url(REDIS_URL, decode_responses=True)
 
 def test_buy_ticket_success():
     payload = {"event_id": "live-verdena", "user_id": "user_01"}
@@ -29,9 +33,31 @@ def test_health_check():
     data = response.json()
     assert data["status"] == "ok"
 
+def test_buy_ticket_success_and_redis():
+    payload = {"event_id": "live-verdena", "user_id": "user-test-redis"}
+    response = requests.post(f"{API_URL}/buy", json=payload)
+
+    assert response.status_code == 202, response.text
+    data = response.json()
+    order_id = data["order_id"]
+    partition = data["partition"]
+    offset = data["offset"]
+
+    assert order_id
+    assert data["status"] == "queued"
+    redis_key = f"queue:{order_id}"
+    time.sleep(0.5)
+    redis_value = rdb.get(redis_key)
+    expected_value = f"{partition}:{offset}"
+    assert redis_value is not None, f"{redis_key} does not exist in Redis"
+    assert redis_value == expected_value, f"Wrong Redis value {expected_value} != {redis_value}"
+    rdb.delete(redis_key)
+
+
 if __name__ == "__main__":
     test_buy_ticket_success()
     test_buy_ticket_missing_event()
     test_buy_ticket_empty_user()
     test_health_check()
+    test_buy_ticket_success_and_redis()
     print("All tests passed")
