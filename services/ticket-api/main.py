@@ -3,7 +3,7 @@ import os
 from contextlib import asynccontextmanager
 import asyncio
 import sys
-from confluent_kafka import KafkaException, Producer
+from confluent_kafka import KafkaException, Producer, TopicPartition, Consumer
 from pydantic import BaseModel, StringConstraints
 from fastapi import FastAPI, HTTPException, Request
 from loguru import logger
@@ -17,6 +17,7 @@ TOPIC_REQUESTS = os.getenv("TOPIC_REQUESTS", "topic-requests")
 DELIVERY_TIMEOUT_S = float(os.getenv("DELIVERY_TIMEOUT_S", "10"))
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 QUEUE_TTL_S = int(os.getenv("QUEUE_TTL_S", "86400"))
+INVENTORY_GROUP = os.getenv("INVENTORY_GROUP", "group-inventory")
 
 logger.remove()
 logger.add(sys.stderr, format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan> - <level>{message}</level>")
@@ -36,6 +37,45 @@ conf = {
 }
 producer = Producer(conf)
 
+monitor = Consumer({ # This consumer never subscribes to any topic, it is only used to monitor order status
+    "bootstrap.servers": KAFKA_BOOTSTRAP,
+    "group.id": INVENTORY_GROUP,
+    "enable.auto.commit": False,
+})
+
+def fetch_commit() -> dict[int,int]: # {partition: committed_offset} number of order that have been processed by the inventory service
+    meta = monitor.list_topics(TOPIC_REQUESTS, timeout=10.0)
+    partitions = [ TopicPartition(TOPIC_REQUESTS, p) for p in meta.topics[TOPIC_REQUESTS].partitions]
+    committed = monitor.committed(partitions, timeout=10)
+    return {tp.partition: tp.offset for tp in committed if tp.offset >= 0}
+
+committed_offsets = {} # {partition: committed_offset} number of order that have been processed by the inventory service
+throughput = {} # {partition: throughput} number of order that have been processed by the inventory service per second
+
+async def queue_monitor():
+    global committed_offsets
+    previous, previous_ts = {}, time.monotonic()
+
+    while True:
+        try:
+            current = await asyncio.to_thread(fetch_commit)
+            now = time.monotonic()
+            elapsed = now - previous_ts # time elapsed since last fetch_commit() call
+
+            if previous and elapsed > 0:
+                for partition, offset in current.items():
+                    consumed = offset - previous.get(partition, offset) # number of orders processed since last call
+                    rate = consumed / elapsed
+                    throughput[partition] = 0.6 * throughput.get(partition, rate) + 0.4 * rate
+
+            committed_offsets = current
+            previous, previous_ts = current, now
+        except Exception as e:
+            logger.warning(f"Queue monitor failed: {e}")
+        await asyncio.sleep(1.0)
+
+
+
 async def kafka_poller(): # ask for kafka response
     while True:
         producer.poll(0.1)
@@ -45,11 +85,14 @@ async def kafka_poller(): # ask for kafka response
 async def server_life(app: FastAPI):
     bg_poller = asyncio.create_task(kafka_poller())
     logger.info("Kafka producer created, background poller started")
+    bg_monitor = asyncio.create_task(queue_monitor())
     yield
     bg_poller.cancel()
     latest_msg = producer.flush(5.0) #send last messages
     if latest_msg:
         logger.warning(f"Kafka producer flush timeout: {latest_msg} messages not delivered")
+    bg_monitor.cancel()
+    monitor.close()
 
 app = FastAPI(lifespan=server_life)
 
@@ -134,3 +177,12 @@ async def healthz():
     except KafkaException:
         raise HTTPException(status_code=503, detail="Kafka not reachable")
     return {"status": "ok"}
+
+if __name__ == "__main__":
+    async def demo():
+        asyncio.create_task(queue_monitor())
+        for _ in range(100):
+            await asyncio.sleep(1)
+            print("offsets:", committed_offsets, "| rate:", 
+                  {p: round(r, 2) for p, r in throughput.items()})
+    asyncio.run(demo())
