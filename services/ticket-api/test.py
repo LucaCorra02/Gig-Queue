@@ -53,11 +53,27 @@ def test_buy_ticket_success_and_redis():
     assert redis_value == expected_value, f"Wrong Redis value {expected_value} != {redis_value}"
     rdb.delete(redis_key)
 
+TESTS = [
+    test_buy_ticket_success,
+    test_buy_ticket_missing_event,
+    test_buy_ticket_empty_user,
+    test_health_check,
+    test_buy_ticket_success_and_redis
+]
+
 
 if __name__ == "__main__":
-    test_buy_ticket_success()
-    test_buy_ticket_missing_event()
-    test_buy_ticket_empty_user()
-    test_health_check()
-    test_buy_ticket_success_and_redis()
-    print("All tests passed")
+    passed, failed = 0, 0
+    for test in TESTS:
+        name = test.__name__
+        try:
+            test()
+            print(f"PASS {name}")
+            passed += 1
+        except AssertionError as exc:
+            print(f"FAIL  {name,exc}")
+            failed += 1
+        except Exception as exc:
+            print(f"ERROR {name}, {type(exc).__name__}, {exc}")
+            failed += 1
+    print(f"Passed {passed}, Failed {failed}")
