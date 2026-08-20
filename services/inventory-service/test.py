@@ -11,6 +11,7 @@ REDIS_URL = "redis://localhost:6379/0"
 KAFKA = "localhost:9092,localhost:9094,localhost:9096"
 TOPIC_REQUESTS = "topic-requests"
 TOPIC_ORDERS = "topic-orders"
+TOPIC_DLQ = "topic-dlq"
 
 rdb = redis.Redis.from_url(REDIS_URL, decode_responses=True)
 
@@ -146,8 +147,53 @@ def test_lua():
     time.sleep(1)
     second = seats_left(event)
 
-    assert first == 9, "seats = %" % first
-    assert second == 9, "seats = %" % second
+    assert first == 9, "seats = %s" % first
+    assert second == 9, "seats = %s" % second
+
+
+def wait_for_dlq(marker, timeout=30):
+    consumer = Consumer({
+        "bootstrap.servers": KAFKA,
+        "group.id": "test-dlq-%s" % uuid.uuid4().hex[:8],
+        "auto.offset.reset": "earliest",
+        "enable.auto.commit": False,
+    })
+    consumer.subscribe([TOPIC_DLQ])
+    deadline = time.time() + timeout
+    found = None
+    try:
+        while time.time() < deadline and found is None:
+            msg = consumer.poll(1.0)
+            if msg is None or msg.error(): continue
+            entry = json.loads(msg.value())
+            if marker in (entry.get("raw_msg") or ""):
+                found = entry
+    finally:
+        consumer.close()
+    return found
+
+
+def test_dlq_malformed_message():
+    n_seats = 10
+    event = new_event(seats=n_seats)
+    marker = uuid.uuid4().hex
+    send_raw(event, f"this is not json {marker}".encode())
+    entry = wait_for_dlq(marker)
+
+    assert entry is not None, "malformed message never reached topic-dlq"
+    assert marker in entry["raw_msg"], entry
+    assert entry["reason"], "missing reason field"
+
+    marker2 = uuid.uuid4().hex
+    send_raw(event, json.dumps({"order_id": marker2}).encode()) # missing fields
+    assert wait_for_dlq(marker2) is not None, "missing-fields message not in topic-dlq"
+
+    order_id = buy(event)
+    outcomes = wait_for_outcomes([order_id])
+    assert order_id in outcomes, "queue blocked after malformed messages"
+    assert outcomes[order_id]["status"] == "confirmed", outcomes[order_id]
+
+    assert seats_left(event) == n_seats-1, "a discarded message consumed a seat: %s" % seats_left(event)
 
 
 TESTS = [
@@ -157,6 +203,7 @@ TESTS = [
     test_sold_out,
     test_no_oversell,
     test_lua,
+    test_dlq_malformed_message
 ]
 
 if __name__ == "__main__":
