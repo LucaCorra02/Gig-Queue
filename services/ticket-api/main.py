@@ -10,13 +10,17 @@ from loguru import logger
 from typing import Annotated
 import uuid
 import time
+import redis
 
 KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP", "localhost:9092")
 TOPIC_REQUESTS = os.getenv("TOPIC_REQUESTS", "topic-requests")
 DELIVERY_TIMEOUT_S = float(os.getenv("DELIVERY_TIMEOUT_S", "10"))
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+QUEUE_TTL_S = int(os.getenv("QUEUE_TTL_S", "86400"))
 
 logger.remove()
 logger.add(sys.stderr, format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan> - <level>{message}</level>")
+rdb = redis.from_url(REDIS_URL, decode_responses=True)
 
 conf = {
     'bootstrap.servers': KAFKA_BOOTSTRAP,
@@ -106,6 +110,15 @@ async def buy_ticket(body: BuyRequest, request: Request):
     except KafkaException as e:
         logger.error(f"Kafka delivery report error: {e}")
         raise HTTPException(status_code=503, detail=f"Kafka delivery report error: {e}")
+
+    try:
+        # Store order partition and offset to allow clients to query the order status
+        await asyncio.to_thread(
+            rdb.setex, f"queue:{order_id}", QUEUE_TTL_S,
+            f"{msg.partition()}:{msg.offset()}"
+        )
+    except Exception as e:
+        logger.warning(f"Failed to store order {order_id} status in Redis: {e}")
 
     return BuyResponse(
         order_id=payload["order_id"],
