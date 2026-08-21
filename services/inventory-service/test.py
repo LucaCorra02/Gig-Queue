@@ -195,6 +195,21 @@ def test_dlq_malformed_message():
 
     assert seats_left(event) == n_seats-1, "a discarded message consumed a seat: %s" % seats_left(event)
 
+def test_redis_hash_order_status():
+    event = new_event(seats=5)
+    order_id = buy(event, "user_redis")
+    outcomes = wait_for_outcomes([order_id])
+    assert order_id in outcomes, "no outcome for order"
+    outcome = outcomes[order_id]
+    assert outcome["status"] == "confirmed", outcome
+
+    redis_key = f"order:{order_id}"
+    redis_value = rdb.hgetall(redis_key)
+    expired = rdb.ttl(redis_key)
+    assert redis_value, f"{redis_key} does not exist in Redis"
+    assert redis_value.get("status") == "confirmed", redis_value
+    assert int(redis_value.get("seat")) == 1, redis_value
+    assert expired > 86000, f"TTL is too short: {expired} seconds"
 
 TESTS = [
     test_confirmed_order,
@@ -203,7 +218,8 @@ TESTS = [
     test_sold_out,
     test_no_oversell,
     test_lua,
-    test_dlq_malformed_message
+    test_dlq_malformed_message,
+    test_redis_hash_order_status
 ]
 
 if __name__ == "__main__":
