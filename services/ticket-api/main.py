@@ -178,11 +178,53 @@ async def healthz():
         raise HTTPException(status_code=503, detail="Kafka not reachable")
     return {"status": "ok"}
 
-if __name__ == "__main__":
-    async def demo():
-        asyncio.create_task(queue_monitor())
-        for _ in range(100):
-            await asyncio.sleep(1)
-            print("offsets:", committed_offsets, "| rate:", 
-                  {p: round(r, 2) for p, r in throughput.items()})
-    asyncio.run(demo())
+class StatusResponse(BaseModel):
+    order_id: str
+    status: str
+    queue_ahead: Optional[int] = None
+    eta_seconds: Optional[float] = None
+    seat: Optional[int] = None
+    reason: Optional[str] = None
+
+def offsets_ahead(partition: int, offset: int) -> int:
+    head = committed_offsets.get(partition)
+    if head is None: return 0
+    return max(0, offset - head) # Number of orders ahead in the queue for this partition
+
+
+def eta_seconds(partition: int, ahead: int) -> Optional[float]:
+    if ahead <= 0: return 0.0
+    rate = throughput.get(partition, 0.0)
+    if rate <= 0.1: return None
+    return round(ahead / rate, 1)
+
+
+@app.get("/status", response_model=StatusResponse)
+async def order_status(order_id: str = Query(..., min_length=8)):
+    try:
+        position = await asyncio.to_thread(rdb.get, f"queue:{order_id}")
+        record = await asyncio.to_thread(rdb.hgetall, f"order:{order_id}")
+    except redis.RedisError as e:
+        logger.error(f"Redis unreachable: {e}")
+        raise HTTPException(status_code=503, detail="Redis temporarily unavailable")
+
+    if record: # Order has been processed
+        if record["status"] == "confirmed":
+            return StatusResponse(order_id=order_id, status="confirmed",
+                                  queue_ahead=0, eta_seconds=0.0,
+                                  seat=int(record["seat"]))
+        return StatusResponse(order_id=order_id, status="rejected",
+                              queue_ahead=0, eta_seconds=0.0,
+                              reason=record.get("reason", "sold_out"))
+
+    if not position: raise HTTPException(status_code=404, detail="Unknown order")
+
+    info = json.loads(position)
+    ahead = offsets_ahead(info["partition"], info["offset"])
+
+    return StatusResponse(
+        order_id=order_id,
+        status="queued" if ahead > 0 else "processing",
+        queue_ahead=ahead,
+        eta_seconds=eta_seconds(info["partition"], ahead),
+    )
