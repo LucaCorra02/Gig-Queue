@@ -3,6 +3,7 @@ import redis
 import time
 import json
 import uuid
+import subprocess
 
 API_URL = "http://localhost:8080"
 REDIS_URL = "redis://localhost:6379/0"
@@ -109,6 +110,32 @@ def test_status_rejected_order():
     assert final["seat"] is None, final
     assert final["queue_ahead"] == 0, final
 
+def test_queue_position_per_event():
+    event = new_event(seats=50)
+    n = 8
+
+    subprocess.run(["docker", "compose", "stop", "inventory-service"], check=True)
+    print("Inventory-service stopped")
+    try:
+        responses = [buy(event, "user_test_queue_%d" % i) for i in range(n)]
+        last_order = responses[-1]['order_id']
+        st = status(last_order).json()
+
+        assert st["status"] == "queued", f"status should be queued, got {st['status']}"
+        assert st["queue_ahead"] > 0, f"queue ahead should be > 0, got {st['queue_ahead']}"
+        assert int(rdb.get(f"queue_seq:{event}")) == n
+        done = rdb.get(f"queue_done:{event}")
+        assert done is None or int(done) == 0, f"current serving order should be 0, got {done}"
+    finally:
+        print("Inventory-service started")
+        subprocess.run(["docker", "compose", "start", "inventory-service"], check=True)
+
+    final = wait_for_status(last_order, ("confirmed", "rejected"))
+    #print(final)
+    assert final["status"] == "confirmed", final
+    assert final["queue_ahead"] == 0, final
+    assert int(rdb.get(f"queue_seq:{event}")) == int(rdb.get(f"queue_done:{event}")) == n
+
 TESTS = [
     test_buy_ticket_success,
     test_buy_ticket_missing_event,
@@ -116,7 +143,8 @@ TESTS = [
     test_health_check,
     test_buy_ticket_success_and_redis,
     test_status_lifecycle,
-    test_status_rejected_order
+    test_status_rejected_order,
+    test_queue_position_per_event
 ]
 
 
