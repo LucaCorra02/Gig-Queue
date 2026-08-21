@@ -211,6 +211,33 @@ def test_redis_hash_order_status():
     assert int(redis_value.get("seat")) == 1, redis_value
     assert expired > 86000, f"TTL is too short: {expired} seconds"
 
+def test_queue_replay():
+    event = new_event(seats=10)
+    order_id = uuid.uuid4().hex
+    payload = json.dumps({
+        "order_id": order_id, "event_id": event,
+        "user_id": "user_tes", "ts_ms": int(time.time() * 1000),
+    }).encode()
+
+    send_raw(event, payload)
+    time.sleep(2)
+    done_first = int(rdb.get(f"queue_done:{event}") or 0)
+    seats_first = seats_left(event)
+    send_raw(event, payload) # Replay the same order
+    time.sleep(2)
+    done_second = int(rdb.get(f"queue_done:{event}") or 0)
+
+    assert done_first == 1, "queue_done = %s after first order" % done_first
+    assert done_second == 1, "queue_done = %s after second order" % done_second
+    assert seats_left(event) == seats_first == 9, "replay consumed a seat"
+
+def test_queue_done_rejected():
+    event = new_event(seats=1)
+    ids = [buy(event, "u1"), buy(event, "u2")]
+    wait_for_outcomes(ids)
+    time.sleep(1)
+    assert int(rdb.get(f"queue_done:{event}")) == 2, "rejected order did not increment queue_done"
+
 TESTS = [
     test_confirmed_order,
     test_rejected_order,
@@ -219,7 +246,9 @@ TESTS = [
     test_no_oversell,
     test_lua,
     test_dlq_malformed_message,
-    test_redis_hash_order_status
+    test_redis_hash_order_status,
+    test_queue_replay,
+    test_queue_done_rejected
 ]
 
 if __name__ == "__main__":
