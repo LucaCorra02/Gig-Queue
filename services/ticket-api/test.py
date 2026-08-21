@@ -36,11 +36,8 @@ def wait_for_status(order_id, wanted, timeout=40):
 
 
 def test_buy_ticket_success():
-    payload = {"event_id": "live-verdena", "user_id": "user_01"}
-    response = requests.post(f"{API_URL}/buy", json=payload)
-
-    assert response.status_code == 202, response.text
-    data = response.json()
+    event_id = new_event()
+    data = buy(event_id)
     assert data["order_id"]
     assert data["status"] == "queued"
     assert isinstance(data["partition"], int)
@@ -63,11 +60,8 @@ def test_health_check():
     assert data["status"] == "ok"
 
 def test_buy_ticket_success_and_redis():
-    payload = {"event_id": "live-verdena", "user_id": "user-test-redis"}
-    response = requests.post(f"{API_URL}/buy", json=payload)
-
-    assert response.status_code == 202, response.text
-    data = response.json()
+    event_id = new_event()
+    data= buy(event_id, "user-test-redis")
     order_id = data["order_id"]
     partition = data["partition"]
     offset = data["offset"]
