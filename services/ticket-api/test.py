@@ -122,7 +122,7 @@ def test_queue_position_per_event():
         st = status(last_order).json()
 
         assert st["status"] == "queued", f"status should be queued, got {st['status']}"
-        assert st["queue_ahead"] > 0, f"queue ahead should be > 0, got {st['queue_ahead']}"
+        assert st["queue_ahead"] == n - 1, f"expected {n-1} ahead, got {st['queue_ahead']}"
         assert int(rdb.get(f"queue_seq:{event}")) == n
         done = rdb.get(f"queue_done:{event}")
         assert done is None or int(done) == 0, f"current serving order should be 0, got {done}"

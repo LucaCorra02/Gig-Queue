@@ -226,7 +226,7 @@ async def order_status(order_id: str = Query(..., min_length=8)):
     info = json.loads(position)
     event_id = info["event"]
     done = await asyncio.to_thread(rdb.get, f"queue_done:{event_id}") # current order
-    ahead = max(0, info["seq"] - int(done or 0))
+    ahead = max(0, info["seq"] - int(done or 0) - 1)
     eta = eta_seconds(info["partition"], offsets_ahead(info["partition"], info["offset"])) # ETA based on all the orders in the partition
 
     return StatusResponse(
