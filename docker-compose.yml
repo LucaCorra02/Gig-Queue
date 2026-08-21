@@ -172,6 +172,20 @@ services:
       SEATS_PER_EVENT: 100
     networks: [gig-net]
 
+  dlq-monitor:
+    build: ./services/dlq-monitor
+    container_name: dlq-monitor
+    restart: on-failure
+    depends_on:
+      kafka-init: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+    environment:
+      KAFKA_BOOTSTRAP: kafka-1:9093,kafka-2:9095,kafka-3:9097
+      TOPIC_DLQ: topic-dlq
+      GROUP_ID: group-dlq
+      REDIS_URL: redis://redis:6379/0
+    networks: [gig-net]
+
 
   # Kafka GUI
   akhq:
