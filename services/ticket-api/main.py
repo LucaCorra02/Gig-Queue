@@ -5,9 +5,9 @@ import asyncio
 import sys
 from confluent_kafka import KafkaException, Producer, TopicPartition, Consumer
 from pydantic import BaseModel, StringConstraints
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Query
 from loguru import logger
-from typing import Annotated
+from typing import Annotated, Optional
 import uuid
 import time
 import redis
@@ -158,7 +158,7 @@ async def buy_ticket(body: BuyRequest, request: Request):
         # Store order partition and offset to allow clients to query the order status
         await asyncio.to_thread(
             rdb.setex, f"queue:{order_id}", QUEUE_TTL_S,
-            f"{msg.partition()}:{msg.offset()}"
+            json.dumps({"partition": msg.partition(), "offset": msg.offset()})
         )
     except Exception as e:
         logger.warning(f"Failed to store order {order_id} status in Redis: {e}")
