@@ -155,10 +155,14 @@ async def buy_ticket(body: BuyRequest, request: Request):
         raise HTTPException(status_code=503, detail=f"Kafka delivery report error: {e}")
 
     try:
+        # Increment the queue for this event
+        seq = await asyncio.to_thread(rdb.incr, f"queue_seq:{body.event_id}")
+        await asyncio.to_thread(rdb.expire, f"queue_seq:{body.event_id}", QUEUE_TTL_S)
         # Store order partition and offset to allow clients to query the order status
         await asyncio.to_thread(
             rdb.setex, f"queue:{order_id}", QUEUE_TTL_S,
-            json.dumps({"partition": msg.partition(), "offset": msg.offset()})
+            json.dumps({"partition": msg.partition(), "offset": msg.offset(),
+                        "seq": seq, "event": body.event_id})
         )
     except Exception as e:
         logger.warning(f"Failed to store order {order_id} status in Redis: {e}")
@@ -220,11 +224,14 @@ async def order_status(order_id: str = Query(..., min_length=8)):
     if not position: raise HTTPException(status_code=404, detail="Unknown order")
 
     info = json.loads(position)
-    ahead = offsets_ahead(info["partition"], info["offset"])
+    event_id = info["event"]
+    done = await asyncio.to_thread(rdb.get, f"queue_done:{event_id}") # current order
+    ahead = max(0, info["seq"] - int(done or 0))
+    eta = eta_seconds(info["partition"], offsets_ahead(info["partition"], info["offset"])) # ETA based on all the orders in the partition
 
     return StatusResponse(
         order_id=order_id,
         status="queued" if ahead > 0 else "processing",
         queue_ahead=ahead,
-        eta_seconds=eta_seconds(info["partition"], ahead),
+        eta_seconds=eta,
     )

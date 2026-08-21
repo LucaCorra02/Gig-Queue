@@ -50,8 +50,8 @@ RESERVE = rdb.register_script(
 
 def reserve(order_id, event_id, user_id):
     seat, remaining = RESERVE(
-        keys=[ f"seats:{event_id}", f"total:{event_id}",
-               f"processed:{order_id}", f"order:{order_id}" ],
+        keys=[f"seats:{event_id}", f"total:{event_id}", f"processed:{order_id}",
+              f"order:{order_id}", f"queue_done:{event_id}"],
         args=[SEATS_PER_EVENT, DEDUP_TTL_S, event_id, user_id],
     )
     if seat == -1: return None, 0
