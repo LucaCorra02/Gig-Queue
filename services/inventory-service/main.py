@@ -48,10 +48,11 @@ RESERVE = rdb.register_script(
     (Path(__file__).parent / "reserve.lua").read_text(encoding="utf-8")
 )
 
-def reserve(order_id, event_id):
+def reserve(order_id, event_id, user_id):
     seat, remaining = RESERVE(
-        keys=[f"seats:{event_id}", f"total:{event_id}", f"processed:{order_id}"],
-        args=[SEATS_PER_EVENT, DEDUP_TTL_S],
+        keys=[ f"seats:{event_id}", f"total:{event_id}",
+               f"processed:{order_id}", f"order:{order_id}" ],
+        args=[SEATS_PER_EVENT, DEDUP_TTL_S, event_id, user_id],
     )
     if seat == -1: return None, 0
     return seat, remaining
@@ -111,7 +112,7 @@ def read_from_topic():
                 consumer.commit(message=msg, asynchronous=False)
                 continue
 
-            seat, seats_remaining = reserve(order_id, event_id)
+            seat, seats_remaining = reserve(order_id, event_id, user_id)
             if seat is not None:
                 logger.success(f"Confirmed {order_id[:8]} seat={seat} remaining={seats_remaining}")
             else:
