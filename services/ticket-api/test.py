@@ -2,10 +2,38 @@ import requests
 import redis
 import time
 import json
+import uuid
 
 API_URL = "http://localhost:8080"
 REDIS_URL = "redis://localhost:6379/0"
 rdb = redis.from_url(REDIS_URL, decode_responses=True)
+
+def new_event(seats=10):
+    event_id = "api-%s" % uuid.uuid4().hex[:8]
+    rdb.set("total:%s" % event_id, seats)
+    rdb.set("seats:%s" % event_id, seats)
+    return event_id
+
+def buy(event_id, user_id="tester"):
+    r = requests.post(f"{API_URL}/buy",
+                     json={"event_id": event_id, "user_id": user_id}, timeout=15)
+    assert r.status_code == 202, r.text
+    return r.json()
+
+def status(order_id):
+    return requests.get(f"{API_URL}/status", params={"order_id": order_id}, timeout=10)
+
+def wait_for_status(order_id, wanted, timeout=40):
+    deadline = time.time() + timeout
+    last = None
+    while time.time() < deadline:
+        r = status(order_id)
+        if r.status_code == 200:
+            last = r.json()
+            if last["status"] in wanted: return last
+        time.sleep(0.5)
+    raise AssertionError(f"status never reached {wanted}, last was {last}")
+
 
 def test_buy_ticket_success():
     payload = {"event_id": "live-verdena", "user_id": "user_01"}
@@ -58,12 +86,43 @@ def test_buy_ticket_success_and_redis():
     assert offset_redis == offset, f"Wrong Redis offset {offset_redis} != {offset}"
     rdb.delete(redis_key)
 
+def test_status_lifecycle():
+    event = new_event(seats=5)
+    order_id = buy(event)["order_id"]
+
+    first = status(order_id)
+    body = first.json()
+    assert body["order_id"] == order_id, body
+    assert body["status"] in ("queued", "processing", "confirmed"), body
+    assert body["queue_ahead"] is not None and body["queue_ahead"] >= 0, body
+    if body["eta_seconds"] is not None:
+        assert body["eta_seconds"] >= 0, body
+
+    final = wait_for_status(order_id, ("confirmed", "rejected"))
+    assert final["status"] == "confirmed", final
+    assert final["queue_ahead"] == 0, final
+    assert final["seat"] == 1, final
+    assert final["reason"] is None, final
+
+def test_status_rejected_order():
+    event = new_event(seats=1)
+    buy(event, "first")
+    second = buy(event, "second")
+
+    final = wait_for_status(second["order_id"], ("confirmed", "rejected"))
+    assert final["status"] == "rejected", final
+    assert final["reason"] == "sold_out", final
+    assert final["seat"] is None, final
+    assert final["queue_ahead"] == 0, final
+
 TESTS = [
     test_buy_ticket_success,
     test_buy_ticket_missing_event,
     test_buy_ticket_empty_user,
     test_health_check,
-    test_buy_ticket_success_and_redis
+    test_buy_ticket_success_and_redis,
+    test_status_lifecycle,
+    test_status_rejected_order
 ]
 
 
