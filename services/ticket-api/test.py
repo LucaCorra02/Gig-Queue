@@ -1,6 +1,7 @@
 import requests
 import redis
 import time
+import json
 
 API_URL = "http://localhost:8080"
 REDIS_URL = "redis://localhost:6379/0"
@@ -48,9 +49,13 @@ def test_buy_ticket_success_and_redis():
     redis_key = f"queue:{order_id}"
     time.sleep(0.5)
     redis_value = rdb.get(redis_key)
-    expected_value = f"{partition}:{offset}"
+    json_value = json.loads(redis_value)
+    partition_redis = json_value.get("partition")
+    offset_redis = json_value.get("offset")
+
     assert redis_value is not None, f"{redis_key} does not exist in Redis"
-    assert redis_value == expected_value, f"Wrong Redis value {expected_value} != {redis_value}"
+    assert partition_redis == partition, f"Wrong Redis partition {partition_redis} != {partition}"
+    assert offset_redis == offset, f"Wrong Redis offset {offset_redis} != {offset}"
     rdb.delete(redis_key)
 
 TESTS = [
