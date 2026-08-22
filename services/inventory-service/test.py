@@ -253,9 +253,39 @@ def test_quantity_contiguous_seats():
     assert outcome["status"] == "confirmed", outcome
     assert outcome["quantity"] == 4, outcome
     assert outcome["seat"] == 1 and outcome["last_seat"] == 4, outcome
-    assert outcome["last_seat"] - outcome["seat"] + 1 == outcome["quantity"], outcome
     assert seats_left(event) == 16
 
+def test_multiple_group_buys():
+    event = new_event(seats=20)
+    order_ids = [
+        buy_qty(event, "group-1", 4),
+        buy_qty(event, "group-2", 3),
+        buy_qty(event, "group-3", 5),
+    ]
+
+    outcomes = wait_for_outcomes(order_ids)
+    assert len(outcomes) == 3, "not all orders processed"
+    assert seats_left(event) == 8, "remaining seats should be 8"
+    seats_block = [(outcomes[i]['seat'], outcomes[i]['last_seat']) for i in outcomes]
+    assert seats_block == [(1,4), (5,7), (8,12)], "seats not assigned correctly: %s" % seats_block
+    taken = [s for a, b in seats_block for s in range(a, b + 1)]
+    assert len(set(taken)) == len(taken), "overlapping seats assigned: %s" % taken
+
+def test_not_enough_seats():
+    event = new_event(seats=5)
+    wait_for_outcomes([buy_qty(event, "u1", 3)])
+    assert seats_left(event) == 2
+
+    rejected = buy_qty(event, "u2", 5)
+    outcome = wait_for_outcomes([rejected])[rejected]
+    assert outcome["status"] == "rejected", outcome
+    assert outcome["reason"] == "not_enough_seats", outcome
+    assert outcome["seat"] is None, outcome
+    assert seats_left(event) == 2, "seats has been consumed"
+
+    ok = buy_qty(event, "u3", 2)
+    assert wait_for_outcomes([ok])[ok]["status"] == "confirmed"
+    assert seats_left(event) == 0
 
 TESTS = [
     test_confirmed_order,
@@ -268,7 +298,9 @@ TESTS = [
     test_redis_hash_order_status,
     test_queue_replay,
     test_queue_done_rejected,
-    test_quantity_contiguous_seats
+    test_quantity_contiguous_seats,
+    test_multiple_group_buys,
+    test_not_enough_seats,
 ]
 
 if __name__ == "__main__":
