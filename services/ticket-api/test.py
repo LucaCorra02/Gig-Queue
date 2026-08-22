@@ -136,6 +136,29 @@ def test_queue_position_per_event():
     assert final["queue_ahead"] == 0, final
     assert int(rdb.get(f"queue_seq:{event}")) == int(rdb.get(f"queue_done:{event}")) == n
 
+def test_ticket_limit():
+    event = new_event(seats=100)
+    r = requests.post(f"{API_URL}/buy",
+                      json={"event_id": event, "user_id": "u", "quantity": 99},
+                      timeout=10)
+    assert r.status_code == 422, r.text
+
+def test_quantity_zero():
+    event = new_event(seats=100)
+    r = requests.post(f"{API_URL}/buy",
+                      json={"event_id": event, "user_id": "u", "quantity": 0},
+                      timeout=10)
+    assert r.status_code == 422, r.text
+
+def test_default_quantity():
+    event = new_event(seats=10)
+    data = buy(event, "u")
+    assert data["quantity"] == 1, data
+    final = wait_for_status(data["order_id"], ("confirmed", "rejected"))
+    assert final["status"] == "confirmed", final
+    assert final["seat"] == 1 and final["last_seat"] == 1, final
+
+
 TESTS = [
     test_buy_ticket_success,
     test_buy_ticket_missing_event,
@@ -144,7 +167,10 @@ TESTS = [
     test_buy_ticket_success_and_redis,
     test_status_lifecycle,
     test_status_rejected_order,
-    test_queue_position_per_event
+    test_queue_position_per_event,
+    test_ticket_limit,
+    test_quantity_zero,
+    test_default_quantity
 ]
 
 
