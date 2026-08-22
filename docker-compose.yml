@@ -169,7 +169,8 @@ services:
       TOPIC_DLQ: topic-dlq
       GROUP_ID: group-inventory
       REDIS_URL: redis://redis:6379/0
-      SEATS_PER_EVENT: 100
+      SEATS_PER_EVENT: 100 # TODO: increase for demo
+      MAX_QUANTITY: 6
     networks: [gig-net]
 
   dlq-monitor:

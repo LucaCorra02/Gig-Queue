@@ -48,17 +48,17 @@ RESERVE = rdb.register_script(
     (Path(__file__).parent / "reserve.lua").read_text(encoding="utf-8")
 )
 
-def reserve(order_id, event_id, user_id):
-    seat, remaining = RESERVE(
+def reserve(order_id, event_id, user_id, quantity):
+    first, last, remaining = RESERVE(
         keys=[f"seats:{event_id}", f"total:{event_id}", f"processed:{order_id}",
-              f"order:{order_id}", f"queue_done:{event_id}"],
-        args=[SEATS_PER_EVENT, DEDUP_TTL_S, event_id, user_id],
+              f"order:{order_id}", f"queue_done:{event_id}", f"blocked:user:{user_id}"],
+        args=[SEATS_PER_EVENT, DEDUP_TTL_S, event_id, user_id, quantity],
     )
-    if seat == -1: return None, 0
-    return seat, remaining
+    if first == -2: return None, None, remaining, "fraud_suspected"
+    if first == -1: return None, None, remaining, "sold_out" if remaining == 0 else "not_enough_seats"
+    return first, last, remaining, None
 
 delivery_errors = []
-
 def on_delivery(err, msg):
     if err is not None:
         delivery_errors.append(err)
@@ -112,11 +112,17 @@ def read_from_topic():
                 consumer.commit(message=msg, asynchronous=False)
                 continue
 
-            seat, seats_remaining = reserve(order_id, event_id, user_id)
+            quantity = int(order.get("quantity", 1)) # deafault is 1
+            seat, last_seat, seats_remaining, reason = reserve(
+                order_id, event_id, user_id, quantity
+            )
             if seat is not None:
-                logger.success(f"Confirmed {order_id[:8]} seat={seat} remaining={seats_remaining}")
+                logger.success(
+                    f"Confirmed {order_id[:8]} seats={seat}-{last_seat} "
+                    f"qty={quantity} remaining={seats_remaining}"
+                )
             else:
-                logger.warning(f"Rejected {order_id[:8]} - sold out")
+                logger.warning(f"Rejected {order_id[:8]} - {reason}")
 
             response = {
                 "order_id": order_id,
@@ -124,7 +130,10 @@ def read_from_topic():
                 "user_id": user_id,
                 "status": "confirmed" if seat is not None else "rejected",
                 "seat": seat,
+                "last_seat": last_seat,
+                "quantity": quantity,
                 "seats_remaining": seats_remaining,
+                "reason": reason,
                 "source_partition": msg.partition(),
                 "source_offset": msg.offset(),
             }

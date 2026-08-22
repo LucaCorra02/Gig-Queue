@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 import asyncio
 import sys
 from confluent_kafka import KafkaException, Producer, TopicPartition, Consumer
-from pydantic import BaseModel, StringConstraints
+from pydantic import BaseModel, StringConstraints, Field
 from fastapi import FastAPI, HTTPException, Request, Query
 from loguru import logger
 from typing import Annotated, Optional
@@ -18,6 +18,7 @@ DELIVERY_TIMEOUT_S = float(os.getenv("DELIVERY_TIMEOUT_S", "10"))
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 QUEUE_TTL_S = int(os.getenv("QUEUE_TTL_S", "86400"))
 INVENTORY_GROUP = os.getenv("INVENTORY_GROUP", "group-inventory")
+MAX_QUANTITY = int(os.getenv("MAX_QUANTITY", "6"))
 
 logger.remove()
 logger.add(sys.stderr, format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan> - <level>{message}</level>")
@@ -101,10 +102,12 @@ NonEmpty = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)
 class BuyRequest(BaseModel):
     event_id: NonEmpty
     user_id: NonEmpty
+    quantity: int = Field(default=1, ge=1, le=MAX_QUANTITY)
 
 class BuyResponse(BaseModel):
     order_id: str
     status: str
+    quantity: int
     partition: int
     offset: int
 
@@ -125,11 +128,20 @@ async def buy_ticket(body: BuyRequest, request: Request):
             else:
                 loop.call_soon_threadsafe(future.set_result, msg)
 
+    ip = client_ip(request)
+    blocked = await asyncio.to_thread(
+        rdb.exists, f"blocked:user:{body.user_id}", f"blocked:ip:{ip}"
+    )
+    if blocked:
+        logger.warning(f"Blocked request user={body.user_id} ip={ip}")
+        raise HTTPException(status_code=403, detail="Request rejected")
+    
     order_id = uuid.uuid4().hex
     payload = {
         "order_id": order_id,
         "event_id": body.event_id,
         "user_id": body.user_id,
+        "quantity": body.quantity,
         "client_ip": client_ip(request),
         "timestamp_ms": int(time.time() * 1000)
     }
@@ -170,6 +182,7 @@ async def buy_ticket(body: BuyRequest, request: Request):
     return BuyResponse(
         order_id=payload["order_id"],
         status="queued",
+        quantity=body.quantity,
         partition=msg.partition(),
         offset=msg.offset()
     )
@@ -188,6 +201,8 @@ class StatusResponse(BaseModel):
     queue_ahead: Optional[int] = None
     eta_seconds: Optional[float] = None
     seat: Optional[int] = None
+    last_seat: Optional[int] = None
+    quantity: Optional[int] = None
     reason: Optional[str] = None
 
 def offsets_ahead(partition: int, offset: int) -> int:
@@ -212,14 +227,22 @@ async def order_status(order_id: str = Query(..., min_length=8)):
         logger.error(f"Redis unreachable: {e}")
         raise HTTPException(status_code=503, detail="Redis temporarily unavailable")
 
-    if record: # Order has been processed
+    # Order has been processed
+    if record:
         if record["status"] == "confirmed":
-            return StatusResponse(order_id=order_id, status="confirmed",
-                                  queue_ahead=0, eta_seconds=0.0,
-                                  seat=int(record["seat"]))
-        return StatusResponse(order_id=order_id, status="rejected",
-                              queue_ahead=0, eta_seconds=0.0,
-                              reason=record.get("reason", "sold_out"))
+            return StatusResponse(
+                order_id=order_id, status="confirmed",
+                queue_ahead=0, eta_seconds=0.0,
+                seat=int(record["seat"]),
+                last_seat=int(record.get("last_seat", record["seat"])),
+                quantity=int(record.get("quantity", 1)),
+            )
+        return StatusResponse(
+            order_id=order_id, status="rejected",
+            queue_ahead=0, eta_seconds=0.0,
+            quantity=int(record.get("quantity", 1)),
+            reason=record.get("reason", "sold_out"),
+        )
 
     if not position: raise HTTPException(status_code=404, detail="Unknown order")
 
