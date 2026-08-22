@@ -1,11 +1,12 @@
 import os
-from confluent_kafka import Consumer
+from confluent_kafka import Consumer, Producer
 from loguru import logger
 import signal
 import sys
 import redis
 import json
 from pathlib import Path
+import time
 
 KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP", "localhost:9092")
 TOPIC_FRAUD = os.getenv("TOPIC_FRAUD", "topic-fraud")
@@ -34,6 +35,13 @@ consumer = Consumer({
      "client.id": f"fraud-detector-{os.uname().nodename}",
 })
 
+producer = Producer({
+    "bootstrap.servers": KAFKA_BOOTSTRAP,
+    "acks": "all",
+    "enable.idempotence": True,
+})
+
+
 running = True
 def handle_stop(signum, frame):
     global running
@@ -42,6 +50,27 @@ def handle_stop(signum, frame):
 
 signal.signal(signal.SIGINT, handle_stop)
 signal.signal(signal.SIGTERM, handle_stop)
+
+delivery_errors = []
+def on_delivery(err, msg):
+    if err is not None:
+        delivery_errors.append(err)
+
+def deliver_message(topic, value, key=None):
+    delivery_errors.clear()
+    producer.produce(
+        topic=topic,
+        key=key.encode("utf-8") if key else None,
+        value=json.dumps(value).encode("utf-8"),
+        callback=on_delivery
+    )
+    pending = producer.flush(10) # TODO: add batch processing to avoid waiting for each message
+    if pending or delivery_errors:
+        logger.error(f"Result not committed ({delivery_errors})")
+        return False
+    return True
+
+
 
 def detect(user_id, ip):
     user_count, ip_count, user_blocked, ip_blocked, should_alert = DETECT(
@@ -84,16 +113,33 @@ def read_from_topic():
                     f"SUSPECT {user_id} ip={client_ip} reason={reason} "
                     f"user_count={u_count} ip_count={i_count}"
                 )
+                if should_alert:
+                    alert_msg = {
+                        "user_id": user_id,
+                        "client_ip": client_ip,
+                        "reason": reason,
+                        "user_count": u_count,
+                        "ip_count": i_count,
+                        "window_s": WINDOW_S,
+                        "blocked_for_s": BLOCK_TTL_S,
+                        "trigger_order_id": order_id,
+                        "event_id": event_id,
+                        "ts_ms": int(time.time() * 1000),
+                    }
+                    if not deliver_message(TOPIC_FRAUD, alert_msg):
+                        logger.error(f"Failed to produce alert message for {user_id}, stopping without commit")
+                        exit_code = 1
+                        break
+                    logger.warning(f"Produced alert message for {user_id}")
             else:
                 logger.info(
                     f"OK {user_id} ip={client_ip} "
                     f"user_count={u_count} ip_count={i_count}"
                 )
-
             consumer.commit(message=msg, asynchronous=False)
     finally:
+        producer.flush(10)
         consumer.close()
-
     return exit_code
 
 
