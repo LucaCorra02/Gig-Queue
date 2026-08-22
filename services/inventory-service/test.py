@@ -238,6 +238,25 @@ def test_queue_done_rejected():
     time.sleep(1)
     assert int(rdb.get(f"queue_done:{event}")) == 2, "rejected order did not increment queue_done"
 
+def buy_qty(event_id, user_id, quantity):
+    r = requests.post(f"{API_URL}/buy",
+                        json={"event_id": event_id, "user_id": user_id,
+                        "quantity": quantity}, timeout=15)
+    assert r.status_code == 202, r.text
+    return r.json()["order_id"]
+
+def test_quantity_contiguous_seats():
+    event = new_event(seats=20)
+    order_id = buy_qty(event, "group-1", 4)
+
+    outcome = wait_for_outcomes([order_id])[order_id]
+    assert outcome["status"] == "confirmed", outcome
+    assert outcome["quantity"] == 4, outcome
+    assert outcome["seat"] == 1 and outcome["last_seat"] == 4, outcome
+    assert outcome["last_seat"] - outcome["seat"] + 1 == outcome["quantity"], outcome
+    assert seats_left(event) == 16
+
+
 TESTS = [
     test_confirmed_order,
     test_rejected_order,
@@ -248,7 +267,8 @@ TESTS = [
     test_dlq_malformed_message,
     test_redis_hash_order_status,
     test_queue_replay,
-    test_queue_done_rejected
+    test_queue_done_rejected,
+    test_quantity_contiguous_seats
 ]
 
 if __name__ == "__main__":
