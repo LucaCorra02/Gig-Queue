@@ -173,6 +173,25 @@ services:
       MAX_QUANTITY: 6
     networks: [gig-net]
 
+  fraud-detector:
+    build: ./services/fraud-detector
+    container_name: fraud-detector
+    restart: on-failure
+    depends_on:
+      kafka-init: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+    environment:
+      KAFKA_BOOTSTRAP: kafka-1:9093,kafka-2:9095,kafka-3:9097
+      TOPIC_REQUESTS: topic-requests
+      TOPIC_FRAUD: topic-fraud
+      GROUP_ID: group-fraud
+      REDIS_URL: redis://redis:6379/0
+      WINDOW_S: 60
+      USER_THRESHOLD: 3
+      IP_THRESHOLD: 15
+      BLOCK_TTL_S: 300
+    networks: [gig-net]
+
   dlq-monitor:
     build: ./services/dlq-monitor
     container_name: dlq-monitor
