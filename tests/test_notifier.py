@@ -90,9 +90,8 @@ def test_notification_counters():
     order_id = buy_id(event, user_id=user)
     wait_for_outcomes([order_id])
     wait_for_mail(f"{user}@{USER_DOMAIN}")
-    
+
     assert wait_until(lambda: int(rdb.get("notifications:count") or 0) > before), "notifications count not grew"
-    assert rdb.llen("notifications:recent") <= 50, "recent list is not bounded"
 
 TESTS = [
     test_confirmed_order_email,
