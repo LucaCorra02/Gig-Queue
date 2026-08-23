@@ -1,48 +1,62 @@
-import json
-import os
-from confluent_kafka import Producer
+import requests
+from utils import (run_tests, new_event, new_user, buy_id, wait_for_outcomes, wait_until)
 
-KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP", "localhost:9092")
 
-producer = Producer({
-    "bootstrap.servers": KAFKA_BOOTSTRAP,
-    "client.id": "test-producer"
-})
+MAILPIT_API = "http://localhost:8025/api/v1"
+USER_DOMAIN = "gig-queue.test"
+ADMIN_EMAIL = "security@gig-queue.test"
 
-def delivery_report(err, msg):
-    if err is not None:
-        print(f"err {err}")
-    else:
-        print(f"ok {msg.topic()}")
+def inbox(limit=200):
+    r = requests.get(f"{MAILPIT_API}/messages", params={"limit": limit}, timeout=10)
+    r.raise_for_status()
+    return r.json()["messages"]
 
-order_payload = {
-    "order_id": "test-order-12345",
-    "event_id": "concerto-indie",
-    "user_id": "mario.rossi",
-    "status": "confirmed",
-    "quantity": 2,
-    "seat": 42,
-    "last_seat": 43
-}
-fraud_payload = {
-    "user_id": "bot-spammer",
-    "client_ip": "192.168.1.100",
-    "reason": "ip_rate",
-    "user_count": 2,
-    "ip_count": 55,
-    "window_s": 60,
-    "blocked_for_s": 300,
-    "trigger_order_id": "hack-order-999"
-}
-producer.produce(
-    "topic-orders",
-    value=json.dumps(order_payload).encode('utf-8'),
-    callback=delivery_report
-)
-producer.produce(
-    "topic-fraud",
-    value=json.dumps(fraud_payload).encode('utf-8'),
-    callback=delivery_report
-)
-producer.flush()
-print("Messages sent to Kafka topics: topic-orders and topic-fraud")
+def messages_to(address, limit=200):
+    found_messages = []
+    all_messages = inbox(limit)
+    for message in all_messages:
+        for recipient in message["To"]:
+            if recipient["Address"] == address:
+                found_messages.append(message)
+                break
+    return found_messages
+
+def wait_for_mail(address, count=1, timeout=40):
+    found = []
+    def check():
+        nonlocal found
+        found = messages_to(address)
+        return len(found) >= count
+    assert wait_until(check, timeout), f"expected {count} email(s) to {address}, got {len(found)}"
+    return found
+
+def body_of(message_id):
+    r = requests.get(f"{MAILPIT_API}/message/{message_id}", timeout=10)
+    r.raise_for_status()
+    return r.json().get("Text", "")
+
+def test_confirmed_order_email():
+    event, user = new_event(seats=20), new_user()
+    order_id = buy_id(event, user_id=user, quantity=3)
+    wait_for_outcomes([order_id])
+
+    mails = wait_for_mail(f"{user}@{USER_DOMAIN}")
+    assert len(mails) == 1, f"expected 1 email, got {len(mails)}"
+    mail = mails[0]
+    assert "confirmed" in mail["Subject"].lower(), mail["Subject"]
+    assert event in mail["Subject"], mail["Subject"]
+
+    body = body_of(mail["ID"])
+    assert order_id in body
+    assert "1-3" in body, f"seat range missing from body: {body}"
+
+TESTS = [
+    test_confirmed_order_email,
+]
+
+def clear_inbox():
+    requests.delete(f"{MAILPIT_API}/messages", timeout=10)
+
+if __name__ == "__main__":
+    clear_inbox()
+    run_tests(TESTS)
