@@ -171,6 +171,15 @@ def queue_seq(event_id):
 def queue_done(event_id):
     return int(rdb.get(f"queue_done:{event_id}") or 0)
 
+def exist_blocked_user(user_id):
+    return rdb.exists(f"blocked:user:{user_id}")
+
+def get_fraud_count(user_id):
+    return int(rdb.get(f"fraud:user:{user_id}") or 0)
+
+def get_allert_count(user_id):
+    return int(rdb.get(f"alerted:{user_id}") or 0)
+
 def wait_until(predicate, timeout=30):
     deadline = time.time() + timeout
     while time.time() < deadline:
