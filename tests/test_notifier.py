@@ -1,6 +1,6 @@
 import requests
-from utils import (run_tests, new_event, new_user, buy_id, wait_for_outcomes, wait_until)
-
+from utils import (run_tests, new_event, new_user, buy_id, wait_for_outcomes, wait_until, post_buy
+                   , USER_THRESHOLD, new_ip, exist_blocked_user)
 
 MAILPIT_API = "http://localhost:8025/api/v1"
 USER_DOMAIN = "gig-queue.test"
@@ -50,8 +50,41 @@ def test_confirmed_order_email():
     assert order_id in body
     assert "1-3" in body, f"seat range missing from body: {body}"
 
+def test_rejected_order_email():
+    event = new_event(seats=1)
+    buy_id(event)
+    user = new_user()
+    order_id = buy_id(event, user_id=user)
+    wait_for_outcomes([order_id])
+
+    mail = wait_for_mail(f"{user}@{USER_DOMAIN}")[0]
+    assert "rejected" in mail["Subject"].lower()
+    body = body_of(mail["ID"])
+    assert "sold out" in body.lower(), body
+
+def test_fraud_alert_email():
+    before = len(messages_to(ADMIN_EMAIL))
+    event, user, ip = new_event(seats=100), new_user(), new_ip()
+
+    for _ in range(USER_THRESHOLD + 5):
+        post_buy(event_id=event, user_id=user, ip=ip)
+    assert wait_until(lambda: exist_blocked_user(user)), "user never blocked"
+
+    def admin_got_it():
+        return any(user in m["Subject"] for m in messages_to(ADMIN_EMAIL))
+    assert wait_until(admin_got_it, timeout=40), "no security alert reached the admin"
+
+    mail = next(m for m in messages_to(ADMIN_EMAIL) if user in m["Subject"])
+    assert "SECURITY ALERT" in mail["Subject"]
+    body = body_of(mail["ID"])
+    assert ip in body, body
+    assert "user_rate" in body, body
+    assert len(messages_to(ADMIN_EMAIL)) > before, "admin inbox did not grow"
+
 TESTS = [
     test_confirmed_order_email,
+    test_rejected_order_email,
+    test_fraud_alert_email,
 ]
 
 def clear_inbox():
