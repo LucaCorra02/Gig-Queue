@@ -18,6 +18,7 @@ SMTP_PORT = int(os.getenv("SMTP_PORT", "1025"))
 MAIL_FROM = os.getenv("MAIL_FROM", "noreply@gig-queue.test")
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "security@gig-queue.test")
 USER_DOMAIN = os.getenv("USER_DOMAIN", "gig-queue.test")
+NOTIFY_TTL_S = int(os.getenv("NOTIFY_TTL_S", "86400"))
 
 logger.remove()
 logger.add(sys.stderr, format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan> - <level>{message}</level>")
@@ -134,7 +135,7 @@ def handle_message(msg):
         return True
 
     send_email(to_address, subject, body)
-    rdb.set(dedup_key, "1", ex=3600) # avoid duplicate notifications
+    rdb.set(dedup_key, "1", ex=NOTIFY_TTL_S) # avoid duplicate notifications
     remember(kind) # increase counters for metrics
     logger.success(f"sent {kind} notification to {to_address}:{subject}")
     return True
