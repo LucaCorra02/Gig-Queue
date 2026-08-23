@@ -41,7 +41,7 @@ def test_rejected_order():
 def test_multiple_orders():
     n_events = 5
     event = new_event(seats=n_events)
-    order_ids = [buy_id(event, "user_%d" % i) for i in range(n_events)]
+    order_ids = [buy_id(event) for _ in range(n_events)]
     assert n_events == len(order_ids)
 
     outcomes = wait_for_outcomes(order_ids)
@@ -53,7 +53,7 @@ def test_multiple_orders():
 def test_sold_out():
     n_seats = 3
     event = new_event(seats=n_seats)
-    order_ids = [buy_id(event, "user_%d" % i) for i in range(n_seats*2)]
+    order_ids = [buy_id(event) for _ in range(n_seats*2)]
 
     outcomes = wait_for_outcomes(order_ids)
     assert len(outcomes) == n_seats*2, "trovati %d esiti su %d" % (len(outcomes), n_seats * 2)
@@ -72,7 +72,7 @@ def test_no_oversell():
     event = new_event(seats=n_seats)
     order_ids = []
     with ThreadPoolExecutor(max_workers=15) as pool:
-        order_ids = list(pool.map(lambda i: buy_id(event, "user_%d" % i), range(n_seats*2)))
+        order_ids = list(pool.map(lambda i: buy_id(event), range(n_seats*2)))
 
     outcomes = wait_for_outcomes(order_ids, timeout=60)
     seats_confirmed = [o["seat"] for o in outcomes.values() if o["status"] == "confirmed"]
@@ -176,7 +176,7 @@ def test_multiple_group_buys():
     outcomes = wait_for_outcomes(order_ids)
     assert len(outcomes) == 3, "not all orders processed"
     assert seats_left(event) == 8, "remaining seats should be 8"
-    seats_block = [(outcomes[i]['seat'], outcomes[i]['last_seat']) for i in outcomes]
+    seats_block = [(outcomes[i]['seat'], outcomes[i]['last_seat']) for i in order_ids]
     assert seats_block == [(1,4), (5,7), (8,12)], "seats not assigned correctly: %s" % seats_block
     taken = [s for a, b in seats_block for s in range(a, b + 1)]
     assert len(set(taken)) == len(taken), "overlapping seats assigned: %s" % taken

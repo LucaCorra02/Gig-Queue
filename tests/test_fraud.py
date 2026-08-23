@@ -7,7 +7,9 @@ import json
 from confluent_kafka import Consumer
 import os
 from utils import (new_event, new_user, new_ip, buy, buy_id, wait_until, wait_for_alerts,
-                   run_tests, exist_blocked_user, get_fraud_count, post_buy, get_allert_count)
+                   run_tests, exist_blocked_user, get_fraud_count, post_buy, get_allert_count,
+                   send_raw, order_payload, seats_left, queue_done, wait_for_outcomes,
+                   TOPIC_REQUESTS)
 
 API_URL = "http://localhost:8080"
 REDIS_URL = "redis://localhost:6379/0"
@@ -79,7 +81,7 @@ def test_fraud_block_user_ip():
     user_ip = new_ip()
     blocked = False
     users = []
-    for i in range(1, IP_THRESHOLD + 3):
+    for i in range(1, IP_THRESHOLD + 8):
         user_tmp = new_user()
         users.append(user_tmp)
         response = post_buy(event_id=event_id, user_id=user_tmp, ip=user_ip)
@@ -100,12 +102,39 @@ def test_fraud_block_user_ip():
         assert not exist_blocked_user(user), \
             f"{user} was blocked because of a shared ip"
 
+def test_inventory_rejects_blocked_user(): # test lua inventory control, no API
+    event = new_event(seats=100)
+    user = new_user("bot")
+    ip = new_ip()
+    for _ in range(USER_THRESHOLD + 3):
+        post_buy(event_id=event, user_id=user, ip=ip)
+    assert wait_until(lambda: exist_blocked_user(user)), "user never blocked"
+
+    seats_before = seats_left(event)
+    done_before = queue_done(event)
+    order_id = uuid.uuid4().hex
+    payload = order_payload(event_id=event, order_id=order_id, user_id=user, ip=ip)
+    send_raw(topic=TOPIC_REQUESTS, key=event, payload_bytes=payload) # produce on topic-requests
+
+    assert wait_until(lambda: rdb.hgetall(f"order:{order_id}") != {}), "the order was never processed by inventory"
+    record = rdb.hgetall(f"order:{order_id}")
+    assert record["status"] == "rejected", record
+    assert record["reason"] == "fraud_suspected", record
+
+    assert seats_left(event) == seats_before, "a blocked order consumed a seat"
+    assert wait_until(lambda: queue_done(event) == done_before + 1), "queue_done did not advance on a blocked order"
+    outcome = wait_for_outcomes([order_id])[order_id]
+    assert outcome["status"] == "rejected", outcome
+    assert outcome["reason"] == "fraud_suspected", outcome
+
+
 TESTS = [
     test_user_is_not_blocked,
     test_fraud_block_user_id,
     test_fraud_block_user_ip,
     test_api_rejects_blocked_user,
-    test_one_alert_per_block
+    test_one_alert_per_block,
+    test_inventory_rejects_blocked_user
 ]
 
 if __name__ == "__main__":
