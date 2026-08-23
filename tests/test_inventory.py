@@ -3,10 +3,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 import redis
-import requests
-from confluent_kafka import Consumer, Producer
-from utils import (new_event, new_user, new_ip, buy, buy_id, status,
-                   wait_for_status, post_buy, run_tests, queue_seq, queue_done,
+from utils import (new_event, buy_id, run_tests, queue_done,
                    wait_for_outcomes, seats_left, send_raw, order_payload, wait_for_dlq)
 
 API_URL = "http://localhost:8080"
