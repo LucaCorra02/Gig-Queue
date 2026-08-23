@@ -4,38 +4,13 @@ import time
 import json
 import uuid
 import subprocess
-import utils
+from utils import (new_event, new_user, new_ip, buy, buy_id, status, 
+                   wait_for_status, post_buy, run_tests, queue_seq, queue_done
+                   )
 
 API_URL = "http://localhost:8080"
 REDIS_URL = "redis://localhost:6379/0"
 rdb = redis.from_url(REDIS_URL, decode_responses=True)
-
-def new_event(seats=10):
-    event_id = "api-%s" % uuid.uuid4().hex[:8]
-    rdb.set("total:%s" % event_id, seats)
-    rdb.set("seats:%s" % event_id, seats)
-    return event_id
-
-def buy(event_id, user_id="tester"):
-    r = requests.post(f"{API_URL}/buy",
-                     json={"event_id": event_id, "user_id": user_id}, timeout=15)
-    assert r.status_code == 202, r.text
-    return r.json()
-
-def status(order_id):
-    return requests.get(f"{API_URL}/status", params={"order_id": order_id}, timeout=10)
-
-def wait_for_status(order_id, wanted, timeout=40):
-    deadline = time.time() + timeout
-    last = None
-    while time.time() < deadline:
-        r = status(order_id)
-        if r.status_code == 200:
-            last = r.json()
-            if last["status"] in wanted: return last
-        time.sleep(0.5)
-    raise AssertionError(f"status never reached {wanted}, last was {last}")
-
 
 def test_buy_ticket_success():
     event_id = new_event()
@@ -46,13 +21,11 @@ def test_buy_ticket_success():
     assert isinstance(data["offset"], int)
 
 def test_buy_ticket_missing_event():
-    payload = {"user_id": "user_01"}
-    response = requests.post(f"{API_URL}/buy", json=payload)
+    response = post_buy(event_id = None, user_id= None, quantity=1, ip=None)
     assert response.status_code == 422
 
 def test_buy_ticket_empty_user():
-    payload = {"event_id": "live-verdena", "user_id": "   "}
-    response = requests.post(f"{API_URL}/buy", json=payload)
+    response = post_buy(event_id = "live-verdena", user_id="    ", quantity=1, ip=None)
     assert response.status_code == 422
 
 def test_health_check():
@@ -84,7 +57,7 @@ def test_buy_ticket_success_and_redis():
 
 def test_status_lifecycle():
     event = new_event(seats=5)
-    order_id = buy(event)["order_id"]
+    order_id = buy_id(event)
 
     first = status(order_id)
     body = first.json()
@@ -114,41 +87,35 @@ def test_status_rejected_order():
 def test_queue_position_per_event():
     event = new_event(seats=50)
     n = 8
-
     subprocess.run(["docker", "compose", "stop", "inventory-service"], check=True)
     print("Inventory-service stopped")
     try:
-        responses = [buy(event, "user_test_queue_%d" % i) for i in range(n)]
-        last_order = responses[-1]['order_id']
+        responses = [buy_id(event, "user_test_queue_%d" % i) for i in range(n)]
+        last_order = responses[-1]
         st = status(last_order).json()
 
         assert st["status"] == "queued", f"status should be queued, got {st['status']}"
         assert st["queue_ahead"] == n - 1, f"expected {n-1} ahead, got {st['queue_ahead']}"
-        assert int(rdb.get(f"queue_seq:{event}")) == n
-        done = rdb.get(f"queue_done:{event}")
+        assert queue_seq(event) == n
+        done = queue_done(event)
         assert done is None or int(done) == 0, f"current serving order should be 0, got {done}"
     finally:
         print("Inventory-service started")
         subprocess.run(["docker", "compose", "start", "inventory-service"], check=True)
 
     final = wait_for_status(last_order, ("confirmed", "rejected"))
-    #print(final)
     assert final["status"] == "confirmed", final
     assert final["queue_ahead"] == 0, final
-    assert int(rdb.get(f"queue_seq:{event}")) == int(rdb.get(f"queue_done:{event}")) == n
+    assert queue_seq(event) == queue_done(event) == n
 
 def test_ticket_limit():
     event = new_event(seats=100)
-    r = requests.post(f"{API_URL}/buy",
-                      json={"event_id": event, "user_id": "u", "quantity": 99},
-                      timeout=10)
+    r = post_buy(event_id=event, user_id=None, quantity=99)
     assert r.status_code == 422, r.text
 
 def test_quantity_zero():
     event = new_event(seats=100)
-    r = requests.post(f"{API_URL}/buy",
-                      json={"event_id": event, "user_id": "u", "quantity": 0},
-                      timeout=10)
+    r = post_buy(event_id=event, user_id=None, quantity=0)
     assert r.status_code == 422, r.text
 
 def test_default_quantity():
@@ -176,17 +143,4 @@ TESTS = [
 
 
 if __name__ == "__main__":
-    passed, failed = 0, 0
-    for test in TESTS:
-        name = test.__name__
-        try:
-            test()
-            print(f"PASS {name}")
-            passed += 1
-        except AssertionError as exc:
-            print(f"FAIL  {name,exc}")
-            failed += 1
-        except Exception as exc:
-            print(f"ERROR {name}, {type(exc).__name__}, {exc}")
-            failed += 1
-    print(f"Passed {passed}, Failed {failed}")
+    run_tests(TESTS)
