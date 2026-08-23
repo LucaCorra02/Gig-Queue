@@ -1,10 +1,13 @@
 import requests
+import redis
 from utils import (run_tests, new_event, new_user, buy_id, wait_for_outcomes, wait_until, post_buy
                    , USER_THRESHOLD, new_ip, exist_blocked_user)
 
 MAILPIT_API = "http://localhost:8025/api/v1"
 USER_DOMAIN = "gig-queue.test"
 ADMIN_EMAIL = "security@gig-queue.test"
+REDIS_URL = "redis://localhost:6379/0"
+rdb = redis.Redis.from_url(REDIS_URL, decode_responses=True)
 
 def inbox(limit=200):
     r = requests.get(f"{MAILPIT_API}/messages", params={"limit": limit}, timeout=10)
@@ -81,10 +84,21 @@ def test_fraud_alert_email():
     assert "user_rate" in body, body
     assert len(messages_to(ADMIN_EMAIL)) > before, "admin inbox did not grow"
 
+def test_notification_counters():
+    before = int(rdb.get("notifications:count") or 0)
+    event, user = new_event(seats=10), new_user()
+    order_id = buy_id(event, user_id=user)
+    wait_for_outcomes([order_id])
+    wait_for_mail(f"{user}@{USER_DOMAIN}")
+    
+    assert wait_until(lambda: int(rdb.get("notifications:count") or 0) > before), "notifications count not grew"
+    assert rdb.llen("notifications:recent") <= 50, "recent list is not bounded"
+
 TESTS = [
     test_confirmed_order_email,
     test_rejected_order_email,
     test_fraud_alert_email,
+    test_notification_counters,
 ]
 
 def clear_inbox():
