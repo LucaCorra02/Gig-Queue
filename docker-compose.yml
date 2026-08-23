@@ -192,6 +192,39 @@ services:
       BLOCK_TTL_S: 300
     networks: [gig-net]
 
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: mailpit
+    ports:
+      - "1025:1025" # smtp
+      - "8025:8025" # ui
+    environment:
+      MP_MAX_MESSAGES: 5000
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_SMTP_AUTH_ALLOW_INSECURE: 1
+    networks: [gig-net]
+
+  notifier:
+    build: ./services/notifier
+    container_name: notifier
+    restart: on-failure
+    depends_on:
+      kafka-init: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+      mailpit: {condition: service_started}
+    environment:
+      KAFKA_BOOTSTRAP: kafka-1:9093,kafka-2:9095,kafka-3:9097
+      TOPIC_ORDERS: topic-orders
+      TOPIC_FRAUD: topic-fraud
+      GROUP_ID: group-notifier
+      REDIS_URL: redis://redis:6379/0
+      SMTP_HOST: mailpit
+      SMTP_PORT: 1025
+      MAIL_FROM: noreply@gig-queue.test
+      ADMIN_EMAIL: security@gig-queue.test
+      USER_DOMAIN: gig-queue.test
+    networks: [gig-net]
+
   dlq-monitor:
     build: ./services/dlq-monitor
     container_name: dlq-monitor
