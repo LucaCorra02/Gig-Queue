@@ -5,3 +5,10 @@ security/*.key
 security/*.jks
 security/*.p12
 security/*.crt
+security/*.key_creds
+security/*.keystore_creds
+security/*.truststore_creds
+security/key_creds
+security/keystore_creds
+security/truststore_creds
+security/ca.srl

@@ -51,7 +51,7 @@ BROKER_KEY_SIZE=2048
 CLIENT_NAMES=("ticket-api" "inventory" "fraud-detector" "dlq-monitor" "notifier" "dashboard" "akhq" "test" "stress-producer")
 CLIENT_TRUSTSTORE="client.truststore.jks" # TODO: modify in python
 
-# Check if a file exists, return 1 if not
+# Check if a file exists, return 1 if exists
 check_existing() {
     local file="$1"
     if [[ -f "$file" ]]; then
@@ -96,3 +96,54 @@ fi
 # check if the keystore of the broker 1
 # keytool -list -v -keystore security/kafka-1.server.truststore.jks -storepass gigQueueSecret
 
+# Create the keystore and certificate for each broker
+for broker in "${BROKER_NAMES[@]}"; do
+    BROKER_KEYSTORE="${broker}.server.keystore.jks"
+    if check_existing "$BROKER_KEYSTORE"; then
+        echo "keystore for $broker already exist"
+        continue;
+    fi # already exists
+
+    # Crete the coupled key for JKS
+    keytool -genkeypair -keystore "$BROKER_KEYSTORE" -alias "$broker" -validity "$BROKER_VALIDITY" -keyalg RSA -keysize "$BROKER_KEY_SIZE" \
+        -dname "CN=${broker},O=GigQueue,C=IT" \
+        -ext "SAN=DNS:${broker},DNS:localhost,IP:127.0.0.1" \
+        -storepass "$KEYSTORE_PWD" -keypass "$KEYSTORE_PWD" -noprompt
+
+    # Create a CSR request for brokers certificates
+    CSR_FILE="${broker}.csr"
+    keytool -certreq -keystore "$BROKER_KEYSTORE" -alias "$broker" -file "$CSR_FILE" \
+        -storepass "$KEYSTORE_PWD" -keypass "$KEYSTORE_PWD" \
+        -ext "SAN=DNS:${broker},DNS:localhost,IP:127.0.0.1"
+
+    # Sign the CSR with the CA to create a signed certificate for the broker
+    SIGNED_CERT="${broker}.cert-signed"
+    SAN_EXT_FILE="${broker}-san.cnf"
+    cat > "$SAN_EXT_FILE" <<EOF
+[san_ext]
+subjectAltName = DNS:${broker},DNS:localhost,IP:127.0.0.1
+EOF
+
+    openssl x509 -req -CA "$CA_CERT" -CAkey "$CA_KEY" -in "$CSR_FILE" -out "$SIGNED_CERT" \
+        -days "$BROKER_VALIDITY" -CAcreateserial -extfile "$SAN_EXT_FILE" -extensions san_ext
+
+    # Import the CA certificate and the signed broker certificate into the broker kaystore
+    keytool -importcert -keystore "$BROKER_KEYSTORE" -alias CARoot -file "$CA_CERT" -storepass "$KEYSTORE_PWD" -noprompt
+    keytool -importcert -keystore "$BROKER_KEYSTORE" -alias "$broker" -file "$SIGNED_CERT" -storepass "$KEYSTORE_PWD" -keypass "$KEYSTORE_PWD" -noprompt
+    chmod 644 "$BROKER_KEYSTORE"
+    rm -f "$CSR_FILE" "$SIGNED_CERT" "$SAN_EXT_FILE"
+    echo "created keytore for $broker broker"
+done
+# For check the keystore of the broker 1:
+# keytool -list -v -keystore kafka-1.server.keystore.jks -storepass gigQueueSecret
+
+# Create the keystore and certificate for docker containers
+echo -n "$KEYSTORE_PWD" > "keystore_creds"
+echo -n "$KEYSTORE_PWD" > "key_creds"
+echo -n "$TRUSTSTORE_PWD" > "truststore_creds"
+
+for broker in "${BROKER_NAMES[@]}"; do
+    echo -n "$KEYSTORE_PWD" > "${broker}.keystore_creds"
+    echo -n "$KEYSTORE_PWD" > "${broker}.key_creds"
+    echo -n "$TRUSTSTORE_PWD" > "${broker}.truststore_creds"
+done
