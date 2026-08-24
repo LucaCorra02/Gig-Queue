@@ -4,3 +4,4 @@ __pycache__/
 security/*.key
 security/*.jks
 security/*.p12
+security/*.crt
