@@ -1,3 +1,6 @@
 __pycache__/
 *.pyc
 .env
+security/*.key
+security/*.jks
+security/*.p12
