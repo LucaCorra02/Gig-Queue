@@ -44,3 +44,55 @@ else
     echo "CA already exists"
 fi
 #openssl x509 -in "$CA_CERT" -text -noout
+
+BROKER_NAMES=("kafka-1" "kafka-2" "kafka-3")
+BROKER_VALIDITY=3650
+BROKER_KEY_SIZE=2048
+CLIENT_NAMES=("ticket-api" "inventory" "fraud-detector" "dlq-monitor" "notifier" "dashboard" "akhq" "test" "stress-producer")
+CLIENT_TRUSTSTORE="client.truststore.jks" # TODO: modify in python
+
+# Check if a file exists, return 1 if not
+check_existing() {
+    local file="$1"
+    if [[ -f "$file" ]]; then
+        if $FORCE; then
+            rm -f "$file"
+            return 1
+        else
+            return 0
+        fi
+    fi
+    return 1
+}
+
+# Create the truststore for kafka brokers by importing the CA certificate
+for broker in "${BROKER_NAMES[@]}"; do
+    BROKER_TRUSTSTORE="${broker}.server.truststore.jks"
+    if ! check_existing "$BROKER_TRUSTSTORE"; then
+        keytool -keystore "$BROKER_TRUSTSTORE" \
+            -alias CARoot \
+            -importcert \
+            -file "$CA_CERT" \
+            -storepass "$TRUSTSTORE_PWD" \
+            -noprompt
+        chmod 644 "$BROKER_TRUSTSTORE"
+        echo "created truststore for $broker"
+    else
+        echo "truststore for $broker already exists"
+    fi
+done
+
+# Create the trust store for java clients (AKHQ)
+if ! check_existing "$CLIENT_TRUSTSTORE"; then
+    keytool -keystore "$CLIENT_TRUSTSTORE" \
+        -alias CARoot \
+        -importcert \
+        -file "$CA_CERT" \
+        -storepass "$CLIENT_TRUSTSTORE_PWD" \
+        -noprompt
+    chmod 644 "$CLIENT_TRUSTSTORE"
+    echo "created java client truststore"
+fi
+# check if the keystore of the broker 1
+# keytool -list -v -keystore security/kafka-1.server.truststore.jks -storepass gigQueueSecret
+
