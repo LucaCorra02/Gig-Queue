@@ -267,8 +267,8 @@ services:
       KAFKA_SSL_KEY: /certs/client.key
     volumes:
       - ./security/ca.crt:/certs/ca.crt:ro,z
-      - ./security/dlq-monitor.crt:/certs/client.crt:ro,z
-      - ./security/dlq-monitor.key:/certs/client.key:ro,z
+      - ./security/notifier.crt:/certs/client.crt:ro,z
+      - ./security/notifier.key:/certs/client.key:ro,z
     networks: [ gig-net ]
 
   dlq-monitor:
