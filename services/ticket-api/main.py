@@ -19,6 +19,14 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 QUEUE_TTL_S = int(os.getenv("QUEUE_TTL_S", "86400"))
 INVENTORY_GROUP = os.getenv("INVENTORY_GROUP", "group-inventory")
 MAX_QUANTITY = int(os.getenv("MAX_QUANTITY", "6"))
+KAFKA_SECURITY: dict[str, str] = {}
+if os.getenv("KAFKA_SECURITY_PROTOCOL", "PLAINTEXT").upper() == "SSL":
+    KAFKA_SECURITY = {
+        "security.protocol": "SSL",
+        "ssl.ca.location": os.getenv("KAFKA_SSL_CA", "/certs/ca.crt"),
+        "ssl.certificate.location": os.getenv("KAFKA_SSL_CERT", "/certs/client.crt"),
+        "ssl.key.location": os.getenv("KAFKA_SSL_KEY", "/certs/client.key"),
+    }
 
 logger.remove()
 logger.add(sys.stderr, format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan> - <level>{message}</level>")
@@ -35,6 +43,7 @@ conf = {
     "linger.ms": 5, # batching
     "compression.type": "snappy",
     "client.id": f"ticket-api-{os.getpid()}",
+    **KAFKA_SECURITY,
 }
 producer = Producer(conf)
 
@@ -42,6 +51,7 @@ monitor = Consumer({ # This consumer never subscribes to any topic, it is only u
     "bootstrap.servers": KAFKA_BOOTSTRAP,
     "group.id": INVENTORY_GROUP,
     "enable.auto.commit": False,
+    **KAFKA_SECURITY,
 })
 
 def fetch_commit() -> dict[int,int]: # {partition: committed_offset} number of order that have been processed by the inventory service

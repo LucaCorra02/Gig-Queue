@@ -185,12 +185,20 @@ services:
       HTTP_ADDR: ":8080"
       REDIS_URL: redis://redis:6379/0
       QUEUE_TTL_S: 86400
+      KAFKA_SECURITY_PROTOCOL: SSL
+      KAFKA_SSL_CA: /certs/ca.crt
+      KAFKA_SSL_CERT: /certs/client.crt
+      KAFKA_SSL_KEY: /certs/client.key
     healthcheck:
       test: [ "CMD-SHELL", "curl -fsS http://localhost:8080/healthz || exit 1" ]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
+    volumes:
+      - ./security/ca.crt:/certs/ca.crt:ro,z
+      - ./security/ticket-api.crt:/certs/client.crt:ro,z
+      - ./security/ticket-api.key:/certs/client.key:ro,z
     networks: [ gig-net ]
 
   inventory-service:
