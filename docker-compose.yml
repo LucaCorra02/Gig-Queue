@@ -326,12 +326,9 @@ services:
     ports:
       - "8090:8080"
     depends_on:
-      kafka-1:
-        condition: service_healthy
-      kafka-2:
-        condition: service_healthy
-      kafka-3:
-        condition: service_healthy
+      kafka-1: { condition: service_healthy }
+      kafka-2: { condition: service_healthy }
+      kafka-3: { condition: service_healthy }
     environment:
       AKHQ_CONFIGURATION: |
         akhq:
@@ -339,4 +336,12 @@ services:
             gig-queue-cluster:
               properties:
                 bootstrap.servers: "kafka-1:9093,kafka-2:9095,kafka-3:9097"
+                security.protocol: SSL
+                ssl.truststore.location: /certs/client.truststore.jks
+                ssl.truststore.password: ${KAFKA_SSL_PASSWORD}
+                ssl.keystore.location: /certs/akhq.keystore.jks
+                ssl.keystore.password: ${KAFKA_SSL_PASSWORD}
+                ssl.key.password: ${KAFKA_SSL_PASSWORD}
+    volumes:
+      - ./security:/certs:ro,z
     networks: [ gig-net ]
