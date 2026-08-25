@@ -18,7 +18,14 @@ USER_THRESHOLD = int(os.getenv("USER_THRESHOLD", 3))
 IP_THRESHOLD = int(os.getenv("IP_THRESHOLD", 15))
 BLOCK_TTL_S = int(os.getenv("BLOCK_TTL_S", "300"))
 ALERT_TTL_S = int(os.getenv("ALERT_TTL_S", "300"))
-
+KAFKA_SECURITY: dict[str, str] = {}
+if os.getenv("KAFKA_SECURITY_PROTOCOL", "PLAINTEXT").upper() == "SSL":
+    KAFKA_SECURITY = {
+        "security.protocol": "SSL",
+        "ssl.ca.location": os.getenv("KAFKA_SSL_CA", "/certs/ca.crt"),
+        "ssl.certificate.location": os.getenv("KAFKA_SSL_CERT", "/certs/client.crt"),
+        "ssl.key.location": os.getenv("KAFKA_SSL_KEY", "/certs/client.key"),
+    }
 
 logger.remove()
 logger.add(sys.stderr, format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan> - <level>{message}</level>")
@@ -33,12 +40,14 @@ consumer = Consumer({
     "auto.offset.reset": "earliest",
     "enable.auto.commit": False,
      "client.id": f"fraud-detector-{os.uname().nodename}",
+     **KAFKA_SECURITY,
 })
 
 producer = Producer({
     "bootstrap.servers": KAFKA_BOOTSTRAP,
     "acks": "all",
     "enable.idempotence": True,
+    **KAFKA_SECURITY,
 })
 
 
