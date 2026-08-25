@@ -19,6 +19,14 @@ MAIL_FROM = os.getenv("MAIL_FROM", "noreply@gig-queue.test")
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "security@gig-queue.test")
 USER_DOMAIN = os.getenv("USER_DOMAIN", "gig-queue.test")
 NOTIFY_TTL_S = int(os.getenv("NOTIFY_TTL_S", "86400"))
+KAFKA_SECURITY: dict[str, str] = {}
+if os.getenv("KAFKA_SECURITY_PROTOCOL", "PLAINTEXT").upper() == "SSL":
+    KAFKA_SECURITY = {
+        "security.protocol": "SSL",
+        "ssl.ca.location": os.getenv("KAFKA_SSL_CA", "/certs/ca.crt"),
+        "ssl.certificate.location": os.getenv("KAFKA_SSL_CERT", "/certs/client.crt"),
+        "ssl.key.location": os.getenv("KAFKA_SSL_KEY", "/certs/client.key"),
+    }
 
 logger.remove()
 logger.add(sys.stderr, format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan> - <level>{message}</level>")
@@ -28,7 +36,8 @@ consumer = Consumer({
     "group.id": GROUP_ID,
     "auto.offset.reset": "earliest",
     "enable.auto.commit": False,
-    "client.id": f"notifier-{os.uname().nodename}"
+    "client.id": f"notifier-{os.uname().nodename}",
+    **KAFKA_SECURITY,
 })
 rdb = redis.Redis.from_url(REDIS_URL, decode_responses=True)
 

@@ -261,6 +261,14 @@ services:
       MAIL_FROM: noreply@gig-queue.test
       ADMIN_EMAIL: security@gig-queue.test
       USER_DOMAIN: gig-queue.test
+      KAFKA_SECURITY_PROTOCOL: SSL
+      KAFKA_SSL_CA: /certs/ca.crt
+      KAFKA_SSL_CERT: /certs/client.crt
+      KAFKA_SSL_KEY: /certs/client.key
+    volumes:
+      - ./security/ca.crt:/certs/ca.crt:ro,z
+      - ./security/dlq-monitor.crt:/certs/client.crt:ro,z
+      - ./security/dlq-monitor.key:/certs/client.key:ro,z
     networks: [ gig-net ]
 
   dlq-monitor:
