@@ -275,6 +275,16 @@ services:
       TOPIC_DLQ: topic-dlq
       GROUP_ID: group-dlq
       REDIS_URL: redis://redis:6379/0
+      KAFKA_SECURITY_PROTOCOL: SSL
+      KAFKA_SSL_CA: /certs/ca.crt
+      KAFKA_SSL_CERT: /certs/client.crt
+      KAFKA_SSL_KEY: /certs/client.key
+    volumes:
+      # only the key pub and private and the ca for this service are loaded
+      # in this way a compromise service can't read the other service private key
+      - ./security/ca.crt:/certs/ca.crt:ro,z
+      - ./security/dlq-monitor.crt:/certs/client.crt:ro,z
+      - ./security/dlq-monitor.key:/certs/client.key:ro,z
     networks: [ gig-net ]
 
   # Kafka GUI

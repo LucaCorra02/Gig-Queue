@@ -12,6 +12,14 @@ GROUP_ID = os.getenv("GROUP_ID", "group-dlq")
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 RECENT_MAX = int(os.getenv("RECENT_MAX", "50"))
 SEEN_TTL_S = int(os.getenv("SEEN_TTL_S", "86400"))
+KAFKA_SECURITY: dict[str, str] = {}
+if os.getenv("KAFKA_SECURITY_PROTOCOL", "PLAINTEXT").upper() == "SSL":
+    KAFKA_SECURITY = {
+        "security.protocol": "SSL",
+        "ssl.ca.location": os.getenv("KAFKA_SSL_CA", "/certs/ca.crt"),
+        "ssl.certificate.location": os.getenv("KAFKA_SSL_CERT", "/certs/client.crt"),
+        "ssl.key.location": os.getenv("KAFKA_SSL_KEY", "/certs/client.key"),
+    }
 
 logger.remove()
 logger.add(sys.stderr, format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan> - <level>{message}</level>")
@@ -20,7 +28,8 @@ consumer = Consumer({
     "bootstrap.servers": KAFKA_BOOTSTRAP,
     "group.id": GROUP_ID,
     "auto.offset.reset": "earliest",
-    "enable.auto.commit": False
+    "enable.auto.commit": False,
+    **KAFKA_SECURITY,
 })
 rdb = redis.Redis.from_url(REDIS_URL, decode_responses=True)
 
