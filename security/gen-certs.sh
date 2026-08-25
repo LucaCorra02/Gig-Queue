@@ -23,7 +23,7 @@ CA_VALIDITY=3650 # ten years
 FORCE=false
 if [[ "${1:-}" == "--force" ]]; then
     FORCE=true
-    rm -f *.key *.crt *.jks *.csr *.cert-signed *.p12 *-san.cnf ca.srl *_creds
+    rm -f *.key *.crt *.jks *.csr *.cert-signed *.p12 *-san.cnf ca.srl *_creds *.properties
     echo "old certificates removed"
 fi
 
@@ -48,7 +48,7 @@ fi
 BROKER_NAMES=("kafka-1" "kafka-2" "kafka-3")
 BROKER_VALIDITY=3650
 BROKER_KEY_SIZE=2048
-CLIENT_NAMES=("ticket-api" "inventory" "fraud-detector" "dlq-monitor" "notifier" "dashboard" "akhq" "test" "stress-producer")
+CLIENT_NAMES=("ticket-api" "inventory" "fraud-detector" "dlq-monitor" "notifier" "dashboard" "akhq" "test" "stress-producer" "admin")
 CLIENT_TRUSTSTORE="client.truststore.jks"
 
 # Check if a file exists, return 1 if exists
@@ -211,3 +211,15 @@ ssl.keystore.password=${KEYSTORE_PWD}
 ssl.key.password=${KEYSTORE_PWD}
 EOF
 chmod 644 client.properties
+
+# CLI for kafka-init container
+# it's not a broker but a admin client
+cat > admin.properties <<EOF
+security.protocol=SSL
+ssl.truststore.location=/etc/kafka/secrets/client.truststore.jks
+ssl.truststore.password=${CLIENT_TRUSTSTORE_PWD}
+ssl.keystore.location=/etc/kafka/secrets/admin.keystore.jks
+ssl.keystore.password=${CLIENT_KEYSTORE_PWD}
+ssl.key.password=${CLIENT_KEYSTORE_PWD}
+EOF
+chmod 644 admin.properties

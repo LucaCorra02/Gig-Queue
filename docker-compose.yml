@@ -58,12 +58,6 @@ services:
       KAFKA_LISTENERS: CONTROLLER://0.0.0.0:9091,INTERNAL://0.0.0.0:9093,EXTERNAL://0.0.0.0:9092
       KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka-1:9093,EXTERNAL://127.0.0.1:9092
 
-      KAFKA_SSL_KEYSTORE_FILENAME: kafka-1.server.keystore.jks
-      KAFKA_SSL_KEYSTORE_CREDENTIALS: kafka-1.keystore_creds
-      KAFKA_SSL_KEY_CREDENTIALS: kafka-1.key_creds
-      KAFKA_SSL_TRUSTSTORE_FILENAME: kafka-1.server.truststore.jks
-      KAFKA_SSL_TRUSTSTORE_CREDENTIALS: kafka-1.truststore_creds
-
       KAFKA_SSL_KEYSTORE_LOCATION: /etc/kafka/secrets/kafka-1.server.keystore.jks
       KAFKA_SSL_KEYSTORE_PASSWORD: ${KAFKA_SSL_PASSWORD}
       KAFKA_SSL_KEY_PASSWORD: ${KAFKA_SSL_PASSWORD}
@@ -91,12 +85,7 @@ services:
       KAFKA_NODE_ID: 2
       KAFKA_LISTENERS: CONTROLLER://0.0.0.0:9091,INTERNAL://0.0.0.0:9095,EXTERNAL://0.0.0.0:9094
       KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka-2:9095,EXTERNAL://127.0.0.1:9094
-      KAFKA_SSL_KEYSTORE_FILENAME: kafka-2.server.keystore.jks
-      KAFKA_SSL_KEYSTORE_CREDENTIALS: kafka-2.keystore_creds
-      KAFKA_SSL_KEY_CREDENTIALS: kafka-2.key_creds
-      KAFKA_SSL_TRUSTSTORE_FILENAME: kafka-2.server.truststore.jks
-      KAFKA_SSL_TRUSTSTORE_CREDENTIALS: kafka-2.truststore_creds
-
+  
       KAFKA_SSL_KEYSTORE_LOCATION: /etc/kafka/secrets/kafka-2.server.keystore.jks
       KAFKA_SSL_KEYSTORE_PASSWORD: ${KAFKA_SSL_PASSWORD}
       KAFKA_SSL_KEY_PASSWORD: ${KAFKA_SSL_PASSWORD}
@@ -124,11 +113,6 @@ services:
       KAFKA_NODE_ID: 3
       KAFKA_LISTENERS: CONTROLLER://0.0.0.0:9091,INTERNAL://0.0.0.0:9097,EXTERNAL://0.0.0.0:9096
       KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka-3:9097,EXTERNAL://127.0.0.1:9096
-      KAFKA_SSL_KEYSTORE_FILENAME: kafka-3.server.keystore.jks
-      KAFKA_SSL_KEYSTORE_CREDENTIALS: kafka-3.keystore_creds
-      KAFKA_SSL_KEY_CREDENTIALS: kafka-3.key_creds
-      KAFKA_SSL_TRUSTSTORE_FILENAME: kafka-3.server.truststore.jks
-      KAFKA_SSL_TRUSTSTORE_CREDENTIALS: kafka-3.truststore_creds
 
       KAFKA_SSL_KEYSTORE_LOCATION: /etc/kafka/secrets/kafka-3.server.keystore.jks
       KAFKA_SSL_KEYSTORE_PASSWORD: ${KAFKA_SSL_PASSWORD}
@@ -154,7 +138,7 @@ services:
       - -c
       - |
         BS=kafka-1:9093
-        CFG=/etc/kafka/secrets/client.properties
+        CFG=/etc/kafka/secrets/admin.properties
 
         create() {
           kafka-topics --bootstrap-server $$BS --command-config $$CFG \
