@@ -17,18 +17,24 @@ x-kafka-common: &kafka-common
     KAFKA_PROCESS_ROLES: broker,controller
     KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka-1:9091,2@kafka-2:9091,3@kafka-3:9091
     CLUSTER_ID: "nJpPclpaSoaVt5igUjTQxQ"
-    KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+    KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:SSL,INTERNAL:SSL,EXTERNAL:SSL
     KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
     KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
     KAFKA_LOG_DIRS: /var/lib/kafka/data
 
-    KAFKA_DEFAULT_REPLICATION_FACTOR: 3
-    KAFKA_MIN_INSYNC_REPLICAS: 2
+    # mTLS
+    KAFKA_SSL_CLIENT_AUTH: required # client must present a valid certificate to connect
+    KAFKA_SSL_ENDPOINT_IDENTIFICATION_ALGORITHM: https # checks the hostname of the broker against the CN in the certificate
+    KAFKA_SSL_PRINCIPAL_MAPPING_RULES: "RULE:^CN=(.*?),.*$$/$$1/,DEFAULT"
+
+    # Non functional requirements
+    KAFKA_DEFAULT_REPLICATION_FACTOR: 3 # HA, all messages are replicated to all brokers
+    KAFKA_MIN_INSYNC_REPLICAS: 2 # Consistency 2 replicas -> commit
     KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
     KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
     KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
-    KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
-    KAFKA_NUM_PARTITIONS: 3
+    KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false" # deny auto topic creation with default parameters
+    KAFKA_NUM_PARTITIONS: 3 # Scalability
     KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
 
 services:
@@ -41,18 +47,31 @@ services:
     ports:
       - "9092:9092"
     healthcheck:
-      test: [ "CMD-SHELL", "nc -z localhost 9093 || exit 1" ]
-      interval: 10s
-      timeout: 5s
-      retries: 15
-      start_period: 40s
+      test: [ "CMD-SHELL", "kafka-broker-api-versions --bootstrap-server kafka-1:9093 --command-config /etc/kafka/secrets/client.properties >/dev/null 2>&1 || exit 1" ]
+      interval: 15s
+      timeout: 15s
+      retries: 10
+      start_period: 60s
     environment:
       <<: *kafka-common-env
       KAFKA_NODE_ID: 1
-      KAFKA_LISTENERS: CONTROLLER://kafka-1:9091,INTERNAL://0.0.0.0:9093,EXTERNAL://0.0.0.0:9092
+      KAFKA_LISTENERS: CONTROLLER://0.0.0.0:9091,INTERNAL://0.0.0.0:9093,EXTERNAL://0.0.0.0:9092
       KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka-1:9093,EXTERNAL://127.0.0.1:9092
+
+      KAFKA_SSL_KEYSTORE_FILENAME: kafka-1.server.keystore.jks
+      KAFKA_SSL_KEYSTORE_CREDENTIALS: kafka-1.keystore_creds
+      KAFKA_SSL_KEY_CREDENTIALS: kafka-1.key_creds
+      KAFKA_SSL_TRUSTSTORE_FILENAME: kafka-1.server.truststore.jks
+      KAFKA_SSL_TRUSTSTORE_CREDENTIALS: kafka-1.truststore_creds
+
+      KAFKA_SSL_KEYSTORE_LOCATION: /etc/kafka/secrets/kafka-1.server.keystore.jks
+      KAFKA_SSL_KEYSTORE_PASSWORD: ${KAFKA_SSL_PASSWORD}
+      KAFKA_SSL_KEY_PASSWORD: ${KAFKA_SSL_PASSWORD}
+      KAFKA_SSL_TRUSTSTORE_LOCATION: /etc/kafka/secrets/kafka-1.server.truststore.jks
+      KAFKA_SSL_TRUSTSTORE_PASSWORD: ${KAFKA_SSL_PASSWORD}
     volumes:
       - kafka-1-data:/var/lib/kafka/data
+      - ./security:/etc/kafka/secrets:ro,z #read password from keystore
     networks: [ gig-net ]
 
   kafka-2:
@@ -62,18 +81,30 @@ services:
     ports:
       - "9094:9094"
     healthcheck:
-      test: [ "CMD-SHELL", "nc -z localhost 9095 || exit 1" ]
-      interval: 10s
-      timeout: 5s
-      retries: 15
-      start_period: 40s
+      test: [ "CMD-SHELL", "kafka-broker-api-versions --bootstrap-server kafka-2:9095 --command-config /etc/kafka/secrets/client.properties >/dev/null 2>&1 || exit 1" ]
+      interval: 15s
+      timeout: 15s
+      retries: 10
+      start_period: 60s
     environment:
       <<: *kafka-common-env
       KAFKA_NODE_ID: 2
-      KAFKA_LISTENERS: CONTROLLER://kafka-2:9091,INTERNAL://0.0.0.0:9095,EXTERNAL://0.0.0.0:9094
+      KAFKA_LISTENERS: CONTROLLER://0.0.0.0:9091,INTERNAL://0.0.0.0:9095,EXTERNAL://0.0.0.0:9094
       KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka-2:9095,EXTERNAL://127.0.0.1:9094
+      KAFKA_SSL_KEYSTORE_FILENAME: kafka-2.server.keystore.jks
+      KAFKA_SSL_KEYSTORE_CREDENTIALS: kafka-2.keystore_creds
+      KAFKA_SSL_KEY_CREDENTIALS: kafka-2.key_creds
+      KAFKA_SSL_TRUSTSTORE_FILENAME: kafka-2.server.truststore.jks
+      KAFKA_SSL_TRUSTSTORE_CREDENTIALS: kafka-2.truststore_creds
+
+      KAFKA_SSL_KEYSTORE_LOCATION: /etc/kafka/secrets/kafka-2.server.keystore.jks
+      KAFKA_SSL_KEYSTORE_PASSWORD: ${KAFKA_SSL_PASSWORD}
+      KAFKA_SSL_KEY_PASSWORD: ${KAFKA_SSL_PASSWORD}
+      KAFKA_SSL_TRUSTSTORE_LOCATION: /etc/kafka/secrets/kafka-2.server.truststore.jks
+      KAFKA_SSL_TRUSTSTORE_PASSWORD: ${KAFKA_SSL_PASSWORD}
     volumes:
       - kafka-2-data:/var/lib/kafka/data
+      - ./security:/etc/kafka/secrets:ro,z
     networks: [ gig-net ]
 
   kafka-3:
@@ -83,18 +114,30 @@ services:
     ports:
       - "9096:9096"
     healthcheck:
-      test: [ "CMD-SHELL", "nc -z localhost 9097 || exit 1" ]
-      interval: 10s
-      timeout: 5s
-      retries: 15
-      start_period: 40s
+      test: [ "CMD-SHELL", "kafka-broker-api-versions --bootstrap-server kafka-3:9097 --command-config /etc/kafka/secrets/client.properties >/dev/null 2>&1 || exit 1" ]
+      interval: 15s
+      timeout: 15s
+      retries: 10
+      start_period: 60s
     environment:
       <<: *kafka-common-env
       KAFKA_NODE_ID: 3
-      KAFKA_LISTENERS: CONTROLLER://kafka-3:9091,INTERNAL://0.0.0.0:9097,EXTERNAL://0.0.0.0:9096
+      KAFKA_LISTENERS: CONTROLLER://0.0.0.0:9091,INTERNAL://0.0.0.0:9097,EXTERNAL://0.0.0.0:9096
       KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka-3:9097,EXTERNAL://127.0.0.1:9096
+      KAFKA_SSL_KEYSTORE_FILENAME: kafka-3.server.keystore.jks
+      KAFKA_SSL_KEYSTORE_CREDENTIALS: kafka-3.keystore_creds
+      KAFKA_SSL_KEY_CREDENTIALS: kafka-3.key_creds
+      KAFKA_SSL_TRUSTSTORE_FILENAME: kafka-3.server.truststore.jks
+      KAFKA_SSL_TRUSTSTORE_CREDENTIALS: kafka-3.truststore_creds
+
+      KAFKA_SSL_KEYSTORE_LOCATION: /etc/kafka/secrets/kafka-3.server.keystore.jks
+      KAFKA_SSL_KEYSTORE_PASSWORD: ${KAFKA_SSL_PASSWORD}
+      KAFKA_SSL_KEY_PASSWORD: ${KAFKA_SSL_PASSWORD}
+      KAFKA_SSL_TRUSTSTORE_LOCATION: /etc/kafka/secrets/kafka-3.server.truststore.jks
+      KAFKA_SSL_TRUSTSTORE_PASSWORD: ${KAFKA_SSL_PASSWORD}
     volumes:
       - kafka-3-data:/var/lib/kafka/data
+      - ./security:/etc/kafka/secrets:ro,z
     networks: [ gig-net ]
 
   kafka-init:
@@ -139,8 +182,8 @@ services:
     ports:
       - "8080:8080"
     depends_on:
-      kafka-init: {condition: service_completed_successfully}
-      redis: {condition: service_healthy}
+      kafka-init: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
     environment:
       KAFKA_BOOTSTRAP: kafka-1:9093,kafka-2:9095,kafka-3:9097
       TOPIC_REQUESTS: topic-requests
@@ -148,20 +191,20 @@ services:
       REDIS_URL: redis://redis:6379/0
       QUEUE_TTL_S: 86400
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/healthz || exit 1"]
+      test: [ "CMD-SHELL", "curl -fsS http://localhost:8080/healthz || exit 1" ]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
-    networks: [gig-net]
+    networks: [ gig-net ]
 
   inventory-service:
     build: ./services/inventory-service
     container_name: inventory-service
     restart: on-failure
     depends_on:
-      kafka-init: {condition: service_completed_successfully}
-      redis: {condition: service_healthy}
+      kafka-init: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
     environment:
       KAFKA_BOOTSTRAP: kafka-1:9093,kafka-2:9095,kafka-3:9097
       TOPIC_REQUESTS: topic-requests
@@ -171,15 +214,15 @@ services:
       REDIS_URL: redis://redis:6379/0
       SEATS_PER_EVENT: 100 # TODO: increase for demo
       MAX_QUANTITY: 6
-    networks: [gig-net]
+    networks: [ gig-net ]
 
   fraud-detector:
     build: ./services/fraud-detector
     container_name: fraud-detector
     restart: on-failure
     depends_on:
-      kafka-init: {condition: service_completed_successfully}
-      redis: {condition: service_healthy}
+      kafka-init: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
     environment:
       KAFKA_BOOTSTRAP: kafka-1:9093,kafka-2:9095,kafka-3:9097
       TOPIC_REQUESTS: topic-requests
@@ -190,7 +233,7 @@ services:
       USER_THRESHOLD: 3
       IP_THRESHOLD: 15
       BLOCK_TTL_S: 300
-    networks: [gig-net]
+    networks: [ gig-net ]
 
   mailpit:
     image: axllent/mailpit:latest
@@ -202,16 +245,16 @@ services:
       MP_MAX_MESSAGES: 5000
       MP_SMTP_AUTH_ACCEPT_ANY: 1
       MP_SMTP_AUTH_ALLOW_INSECURE: 1
-    networks: [gig-net]
+    networks: [ gig-net ]
 
   notifier:
     build: ./services/notifier
     container_name: notifier
     restart: on-failure
     depends_on:
-      kafka-init: {condition: service_completed_successfully}
-      redis: {condition: service_healthy}
-      mailpit: {condition: service_started}
+      kafka-init: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+      mailpit: { condition: service_started }
     environment:
       KAFKA_BOOTSTRAP: kafka-1:9093,kafka-2:9095,kafka-3:9097
       TOPIC_ORDERS: topic-orders
@@ -223,22 +266,21 @@ services:
       MAIL_FROM: noreply@gig-queue.test
       ADMIN_EMAIL: security@gig-queue.test
       USER_DOMAIN: gig-queue.test
-    networks: [gig-net]
+    networks: [ gig-net ]
 
   dlq-monitor:
     build: ./services/dlq-monitor
     container_name: dlq-monitor
     restart: on-failure
     depends_on:
-      kafka-init: {condition: service_completed_successfully}
-      redis: {condition: service_healthy}
+      kafka-init: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
     environment:
       KAFKA_BOOTSTRAP: kafka-1:9093,kafka-2:9095,kafka-3:9097
       TOPIC_DLQ: topic-dlq
       GROUP_ID: group-dlq
       REDIS_URL: redis://redis:6379/0
-    networks: [gig-net]
-
+    networks: [ gig-net ]
 
   # Kafka GUI
   akhq:
