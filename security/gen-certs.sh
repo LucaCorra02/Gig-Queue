@@ -7,7 +7,7 @@ echo Secirity directory: $SCRIPT_DIR
 
 # Load SSL password from .env
 if [[ -f ../.env ]]; then
-    export $(grep -v '^#' ../.env | xargs)
+    set -a; source ../.env; set +a
 fi
 KEYSTORE_PWD="${KAFKA_SSL_PASSWORD}"
 TRUSTSTORE_PWD="${KAFKA_SSL_PASSWORD}"
@@ -49,7 +49,7 @@ BROKER_NAMES=("kafka-1" "kafka-2" "kafka-3")
 BROKER_VALIDITY=3650
 BROKER_KEY_SIZE=2048
 CLIENT_NAMES=("ticket-api" "inventory" "fraud-detector" "dlq-monitor" "notifier" "dashboard" "akhq" "test" "stress-producer")
-CLIENT_TRUSTSTORE="client.truststore.jks" # TODO: modify in python
+CLIENT_TRUSTSTORE="client.truststore.jks"
 
 # Check if a file exists, return 1 if exists
 check_existing() {
@@ -147,3 +147,67 @@ for broker in "${BROKER_NAMES[@]}"; do
     echo -n "$KEYSTORE_PWD" > "${broker}.key_creds"
     echo -n "$TRUSTSTORE_PWD" > "${broker}.truststore_creds"
 done
+
+# Create the keystore and certificate for each client. They should be in a python readable format
+for client in "${CLIENT_NAMES[@]}"; do
+    CLIENT_KEYSTORE="${client}.keystore.jks"
+    CLIENT_CERT="${client}.crt"
+    CLIENT_KEY="${client}.key"
+    if check_existing "$CLIENT_KEYSTORE"; then
+        echo "keystore for $client already exist"
+    else
+        # Create the coupled key for JKS
+        keytool -genkeypair -keystore "$CLIENT_KEYSTORE" -alias "$client" -validity "$BROKER_VALIDITY" -keyalg RSA -keysize "$BROKER_KEY_SIZE" \
+            -dname "CN=${client},O=GigQueue,C=IT" \
+            -storepass "$CLIENT_KEYSTORE_PWD" -keypass "$CLIENT_KEYSTORE_PWD" -noprompt
+
+        # Create a CSR request for client certificates
+        CLIENT_CSR="${client}.csr"
+        keytool -certreq -keystore "$CLIENT_KEYSTORE" -alias "$client" -file "$CLIENT_CSR" \
+            -storepass "$CLIENT_KEYSTORE_PWD" -keypass "$CLIENT_KEYSTORE_PWD"
+
+        # Sign the CSR with the CA to create a signed certificate for the client
+        CLIENT_SIGNED="${client}.cert-signed"
+        openssl x509 -req -CA "$CA_CERT" -CAkey "$CA_KEY" -in "$CLIENT_CSR" -out "$CLIENT_SIGNED" -days "$BROKER_VALIDITY" -CAcreateserial
+
+        # Import the CA certificate and the signed client certificate into the client keystore
+        keytool -importcert -keystore "$CLIENT_KEYSTORE" -alias CARoot -file "$CA_CERT" -storepass "$CLIENT_KEYSTORE_PWD" -noprompt
+        keytool -importcert -keystore "$CLIENT_KEYSTORE" -alias "$client" -file "$CLIENT_SIGNED" -storepass "$CLIENT_KEYSTORE_PWD" -keypass "$CLIENT_KEYSTORE_PWD" -noprompt
+
+        chmod 644 "$CLIENT_KEYSTORE"
+        rm -f "$CLIENT_CSR" "$CLIENT_SIGNED"
+        echo "  -> Keystore JKS creato per $client."
+    fi
+
+    if (check_existing "$CLIENT_CERT" && check_existing "$CLIENT_KEY"); then
+        echo  "client PEM files already exist for $client, skipping extraction."
+        continue;
+    fi
+    CLIENT_P12="${client}.p12"
+
+    # Convert JKS to PKCS12 format for PEM extraction
+    keytool -importkeystore -srckeystore "$CLIENT_KEYSTORE" -srcstorepass "$CLIENT_KEYSTORE_PWD" -srckeypass "$CLIENT_KEYSTORE_PWD" \
+        -srcalias "$client" -destkeystore "$CLIENT_P12" -deststoretype PKCS12 -deststorepass "$CLIENT_KEYSTORE_PWD" -destkeypass "$CLIENT_KEYSTORE_PWD" -noprompt
+
+    # Extract the pubblic certificate .crt
+    openssl pkcs12 -in "$CLIENT_P12" -nokeys -clcerts -out "$CLIENT_CERT" -passin "pass:${CLIENT_KEYSTORE_PWD}"
+    chmod 644 "$CLIENT_CERT"
+
+    # Extract the private key .key
+    openssl pkcs12 -in "$CLIENT_P12" -nocerts -nodes -passin "pass:${CLIENT_KEYSTORE_PWD}" 2>/dev/null | openssl rsa -out "$CLIENT_KEY" 2>/dev/null
+    chmod 600 "$CLIENT_KEY"
+    rm -f "$CLIENT_P12"
+    echo "PEM certificates has been extracted for client $client"
+done
+
+echo "All the certificates has been generated"
+
+cat > client.properties <<EOF
+security.protocol=SSL
+ssl.truststore.location=/etc/kafka/secrets/kafka-1.server.truststore.jks
+ssl.truststore.password=${TRUSTSTORE_PWD}
+ssl.keystore.location=/etc/kafka/secrets/kafka-1.server.keystore.jks
+ssl.keystore.password=${KEYSTORE_PWD}
+ssl.key.password=${KEYSTORE_PWD}
+EOF
+chmod 644 client.properties
