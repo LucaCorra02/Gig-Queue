@@ -18,6 +18,16 @@ TOPIC_DLQ = "topic-dlq"
 USER_THRESHOLD = int(os.getenv("USER_THRESHOLD", 3)) # form docker compose
 IP_THRESHOLD = int(os.getenv("IP_THRESHOLD", 15))
 rdb = redis.Redis.from_url(REDIS_URL, decode_responses=True)
+CERT_DIR = os.getenv(
+    "CERT_DIR",
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "security"),
+)
+KAFKA_SECURITY = {
+    "security.protocol": "SSL",
+    "ssl.ca.location": f"{CERT_DIR}/ca.crt",
+    "ssl.certificate.location": f"{CERT_DIR}/test.crt",
+    "ssl.key.location": f"{CERT_DIR}/test.key",
+}
 
 
 # user and event utils
@@ -81,7 +91,7 @@ def wait_for_status(order_id, wanted, timeout=40):
 # kafka utils
 
 def send_raw(topic, payload_bytes, key=None):
-    producer = Producer({"bootstrap.servers": KAFKA, "acks": "all"})
+    producer = Producer({"bootstrap.servers": KAFKA, "acks": "all", **KAFKA_SECURITY})
     producer.produce(topic=topic, key=key.encode() if key else None, value=payload_bytes)
     producer.flush(10)
 
@@ -105,6 +115,7 @@ def wait_for_outcomes(order_ids, timeout=40):
         "group.id": "test-%s" % uuid.uuid4().hex[:8],
         "auto.offset.reset": "earliest",
         "enable.auto.commit": False,
+        **KAFKA_SECURITY
     })
     consumer.subscribe([TOPIC_ORDERS])
     deadline = time.time() + timeout
@@ -127,6 +138,7 @@ def _collect(topic, match, timeout, first_only):
         "group.id": "test-%s" % uuid.uuid4().hex[:8],
         "auto.offset.reset": "earliest",
         "enable.auto.commit": False,
+        **KAFKA_SECURITY
     })
     consumer.subscribe([topic])
     deadline = time.time() + timeout
