@@ -11,4 +11,5 @@ security/*.truststore_creds
 security/key_creds
 security/keystore_creds
 security/truststore_creds
-security/ca.srl
+security/*.srl
+security/*.properties
