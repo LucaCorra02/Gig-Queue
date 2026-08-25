@@ -209,6 +209,14 @@ services:
       REDIS_URL: redis://redis:6379/0
       SEATS_PER_EVENT: 100 # TODO: increase for demo
       MAX_QUANTITY: 6
+      KAFKA_SECURITY_PROTOCOL: SSL
+      KAFKA_SSL_CA: /certs/ca.crt
+      KAFKA_SSL_CERT: /certs/client.crt
+      KAFKA_SSL_KEY: /certs/client.key
+    volumes:
+      - ./security/ca.crt:/certs/ca.crt:ro,z
+      - ./security/inventory.crt:/certs/client.crt:ro,z
+      - ./security/inventory.key:/certs/client.key:ro,z
     networks: [ gig-net ]
 
   fraud-detector:

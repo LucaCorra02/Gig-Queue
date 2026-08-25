@@ -16,6 +16,14 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 SEATS_PER_EVENT = int(os.getenv("SEATS_PER_EVENT", "100")) # TODO: add some redis records for testing
 TOPIC_ORDERS = os.getenv("TOPIC_ORDERS", "topic-orders")
 DEDUP_TTL_S = int(os.getenv("DEDUP_TTL_S", "86400"))
+KAFKA_SECURITY: dict[str, str] = {}
+if os.getenv("KAFKA_SECURITY_PROTOCOL", "PLAINTEXT").upper() == "SSL":
+    KAFKA_SECURITY = {
+        "security.protocol": "SSL",
+        "ssl.ca.location": os.getenv("KAFKA_SSL_CA", "/certs/ca.crt"),
+        "ssl.certificate.location": os.getenv("KAFKA_SSL_CERT", "/certs/client.crt"),
+        "ssl.key.location": os.getenv("KAFKA_SSL_KEY", "/certs/client.key"),
+    }
 
 logger.remove()
 logger.add(sys.stderr, format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan> - <level>{message}</level>")
@@ -24,7 +32,8 @@ consumer = Consumer({
     "bootstrap.servers": KAFKA_BOOTSTRAP,
     "group.id": GROUP_ID,
     "auto.offset.reset": "earliest", #Start from the begninning of the topic if no previous offset
-    "enable.auto.commit": False # No data loss
+    "enable.auto.commit": False, # No data loss
+    **KAFKA_SECURITY,
 })
 rdb = redis.Redis.from_url(REDIS_URL, decode_responses=True)
 
@@ -32,6 +41,7 @@ producer = Producer({
     "bootstrap.servers": KAFKA_BOOTSTRAP,
     "acks": "all",
     "enable.idempotence": True,
+    **KAFKA_SECURITY,
 })
 
 running = True
