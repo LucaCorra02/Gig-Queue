@@ -1,4 +1,4 @@
-from confluent_kafka import Producer, KafkaException
+from confluent_kafka import Producer, KafkaException, KafkaError
 from utils import run_tests, KAFKA_SECURITY, CERT_DIR
 import logging
 import subprocess
@@ -99,6 +99,22 @@ def test_fake_ca_location():
     metadata = try_connection(conf)
     assert metadata is None, "client trusted a broker not signed by the real CA"
 
+def test_dlq_monitors_permission():
+    producer = Producer({
+        "bootstrap.servers": BOOTSTRAP,
+        "security.protocol": "SSL",
+        "ssl.ca.location": f"{CERT_DIR}/ca.crt",
+        "ssl.certificate.location": f"{CERT_DIR}/dlq-monitor.crt",
+        "ssl.key.location": f"{CERT_DIR}/dlq-monitor.key",
+    }, logger=QUIET) # sim dlq-producer
+
+    errors = []
+    producer.produce("topic-orders", value=b'{"forged": true}',
+                     on_delivery=lambda err, msg: errors.append(err))
+    producer.flush(10)
+    assert errors and errors[0] is not None, "the order was accepted"
+    assert errors[0].code() == KafkaError.TOPIC_AUTHORIZATION_FAILED, errors[0]
+
 
 TESTS  = [
     test_valid_certificate,
@@ -106,7 +122,8 @@ TESTS  = [
     test_listener_ssl,
     test_client_no_cert,
     test_foreign_ca,
-    test_fake_ca_location
+    test_fake_ca_location,
+    test_dlq_monitors_permission
 ]
 
 if __name__ == "__main__":
