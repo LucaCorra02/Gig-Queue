@@ -37,6 +37,11 @@ x-kafka-common: &kafka-common
     KAFKA_NUM_PARTITIONS: 3 # Scalability
     KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
 
+    # ACL
+    KAFKA_AUTHORIZER_CLASS_NAME: org.apache.kafka.metadata.authorizer.StandardAuthorizer
+    KAFKA_SUPER_USERS: User:kafka-1;User:kafka-2;User:kafka-3;User:admin
+    KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: "false"
+
 services:
 
   # Kafka Broker
