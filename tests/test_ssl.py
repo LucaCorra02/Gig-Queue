@@ -115,15 +115,31 @@ def test_dlq_monitors_permission():
     assert errors and errors[0] is not None, "the order was accepted"
     assert errors[0].code() == KafkaError.TOPIC_AUTHORIZATION_FAILED, errors[0]
 
+def test_certificates_services():
+    for name in SERVICE_CERTS:
+        result = subprocess.run(
+            ["openssl", "verify", "-CAfile", f"{CERT_DIR}/ca.crt", f"{CERT_DIR}/{name}.crt"],
+            capture_output=True, text=True)
+        assert result.returncode == 0, f"{name}: {result.stdout}{result.stderr}"
+
+def test_acl_names():
+    for name in SERVICE_CERTS:
+        result = subprocess.run(
+            ["openssl", "x509", "-in", f"{CERT_DIR}/{name}.crt", "-noout", "-subject"],
+            capture_output=True, text=True, check=True)
+        assert f"CN={name}" in result.stdout, result.stdout.strip()
 
 TESTS  = [
     test_valid_certificate,
+    test_no_cert,
     test_internal_listener,
     test_listener_ssl,
     test_client_no_cert,
     test_foreign_ca,
     test_fake_ca_location,
-    test_dlq_monitors_permission
+    test_dlq_monitors_permission,
+    test_certificates_services,
+    test_acl_names,
 ]
 
 if __name__ == "__main__":
