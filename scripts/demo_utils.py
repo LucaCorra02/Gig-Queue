@@ -1,8 +1,9 @@
-from confluent_kafka import Producer, KafkaException
+from confluent_kafka import Producer, KafkaException, Consumer, TopicPartition
 import logging
 import subprocess
 import tempfile
 import os
+import time
 
 BOOTSTRAP = "localhost:9092,localhost:9094,localhost:9096"
 EXTERNAL_PORTS = [9092, 9094, 9096]
@@ -46,3 +47,30 @@ def rogue_certificate(common_name="ticket-api"): # Return a valid certificate si
         )
         _rogue["crt"], _rogue["key"] = crt, key
     return _rogue["crt"], _rogue["key"]
+
+"""
+    Try to read from a topic
+    The client is configured with a valid cert
+    I use assign instead of subscribe to avoid consumer group coordination (overhead)
+"""
+def try_consume(conf, topic, group_id = "demo", seconds=8):
+    errors = set()
+    consumer = Consumer({
+        "bootstrap.servers": BOOTSTRAP,
+        "group.id": group_id,
+        "enable.auto.commit": False,
+        "error_cb": lambda err: errors.add(err.name()),
+        **conf,
+    }, logger=QUIET)
+    consumer.assign([TopicPartition(topic, 0)])
+
+    deadline = time.time() + seconds
+    while time.time() < deadline and not errors:
+        message = consumer.poll(1.0)
+        if message is not None and message.error():
+            errors.add(message.error().name())
+    consumer.close()
+    return errors
+
+def denied(errors):
+    return any("AUTHORIZATION" in name for name in errors)
