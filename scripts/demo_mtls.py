@@ -62,16 +62,17 @@ def client_refuse_server():
     else:
         print("     Refused: client has a valid certificate but trust store is a foreign CA")
 
+DEMO = [
+    demo_valid_certificate,
+    client_no_cert,
+    client_use_tls,
+    fake_ca,
+    client_refuse_server,
+]
 
 if __name__ == "__main__":
-    demo_valid_certificate()
-    print()
-    client_no_cert()
-    print()
-    client_use_tls()
-    print()
-    fake_ca()
-    print()
-    client_refuse_server()
+    for test in DEMO:
+        print()
+        test()
 
 
