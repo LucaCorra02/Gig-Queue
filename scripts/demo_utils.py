@@ -72,5 +72,18 @@ def try_consume(conf, topic, group_id = "demo", seconds=8):
     consumer.close()
     return errors
 
+"""
+    Try to write to in a topic
+    the response is in the delivery callback since produce() is asynchronous
+"""
+def try_produce(conf, topic, payload=b'{"demo": true}', timeout=10):
+    producer = Producer({"bootstrap.servers": BOOTSTRAP, **conf}, logger=QUIET)
+    outcome = []
+    producer.produce(topic, value=payload,
+                     on_delivery=lambda err, msg: outcome.append(err))
+    producer.flush(timeout)
+    if not outcome: return False, None
+    return outcome[0] is None, outcome[0]
+
 def denied(errors):
     return any("AUTHORIZATION" in name for name in errors)
