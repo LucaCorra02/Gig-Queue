@@ -1,5 +1,8 @@
 from confluent_kafka import Producer, KafkaException
 import logging
+import subprocess
+import tempfile
+import os
 
 BOOTSTRAP = "localhost:9092,localhost:9094,localhost:9096"
 EXTERNAL_PORTS = [9092, 9094, 9096]
@@ -27,3 +30,19 @@ def connect(conf, bootstrap=BOOTSTRAP, timeout=8):
         return producer.list_topics(timeout=timeout), None
     except KafkaException as exc:
         return None, str(exc.args[0])
+
+_rogue = {}
+
+def rogue_certificate(common_name="ticket-api"): # Return a valid certificate signed by another CA
+    if not _rogue:
+        directory = tempfile.mkdtemp(prefix="gigqueue-fake-")
+        crt = os.path.join(directory, "fake.crt")
+        key = os.path.join(directory, "fake.key")
+        subprocess.run(
+            ["openssl", "req", "-new", "-x509", "-nodes", "-days", "1",
+             "-subj", f"/CN={common_name},O=GigQueue,C=IT",
+             "-keyout", key, "-out", crt],
+            check=True, capture_output=True,
+        )
+        _rogue["crt"], _rogue["key"] = crt, key
+    return _rogue["crt"], _rogue["key"]
