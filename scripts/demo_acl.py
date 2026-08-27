@@ -13,11 +13,11 @@ def try_dlq_read_permission():
 def try_dlq_read_rejection():
     print("dlq-serive should NOT be able to read from topic-inventory")
     conf = return_valid_ssl_conf("dlq-monitor")
-    errors = try_consume(conf, "topic-inventory", group_id="group-dlq")
+    errors = try_consume(conf, "topic-orders", group_id="group-dlq")
     if denied(errors):
         print(f"    refused: no auth {sorted(errors)}")
     else:
-        print("     allowed:  but it should be allowed")
+        print("     allowed:  but it should be refused")
 
 def try_produce_rejection():
     print("dlq-service should NOT be able to write to topic-orders")

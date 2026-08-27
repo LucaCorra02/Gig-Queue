@@ -35,7 +35,7 @@ def connect(conf, bootstrap=BOOTSTRAP, timeout=8):
 _rogue = {}
 
 def rogue_certificate(common_name="ticket-api"): # Return a valid certificate signed by another CA
-    if not _rogue:
+    if common_name not in _rogue:
         directory = tempfile.mkdtemp(prefix="gigqueue-fake-")
         crt = os.path.join(directory, "fake.crt")
         key = os.path.join(directory, "fake.key")
@@ -45,8 +45,8 @@ def rogue_certificate(common_name="ticket-api"): # Return a valid certificate si
              "-keyout", key, "-out", crt],
             check=True, capture_output=True,
         )
-        _rogue["crt"], _rogue["key"] = crt, key
-    return _rogue["crt"], _rogue["key"]
+        _rogue[common_name] = (crt, key)
+    return _rogue[common_name]
 
 """
     Try to read from a topic
