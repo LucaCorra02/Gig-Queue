@@ -3,8 +3,10 @@ import random
 import time
 import uuid
 import requests
+import zlib
 
 API_URL = os.getenv("API_URL", "http://localhost:8080")
+PARTITIONS = int(os.getenv("PARTITIONS", 3))
 session = requests.Session()
 
 def new_ip():
@@ -46,7 +48,7 @@ def buy(event_id, user_id=None, ip=None, quantity=1):
             f"{API_URL}/buy",
             json={"event_id": record["event"],
                   "user_id": record["user"],
-                  "quantity": quantity},
+                  "quantity": record["quantity"]},
             headers={"X-Forwarded-For": record["ip"]},
             timeout=15,
         )
@@ -64,6 +66,38 @@ def buy(event_id, user_id=None, ip=None, quantity=1):
         record["offset"] = body["offset"]
     return record
 
+def get_partition(event_id, partitions=PARTITIONS):
+    return zlib.crc32(event_id.encode()) % partitions
+
+"""
+    Create 4 events two in the same partition: onnce is the flash sale event and the other is the victim.
+    Other partitions contain only normal traffic events
+    return a list of event id with their role
+"""
+def plan_events(partitions=PARTITIONS):
+    partition = [[] for _ in range(partitions)]
+    n_ev = 0
+    while n_ev < partitions + 1:
+        event_id = new_event("ev")
+        partition_id = get_partition(event_id, partitions)
+        if len(partition[partition_id]) == 0:
+            partition[partition_id].append(event_id)
+        elif len(partition[partition_id]) == 1 and not any(len(p) == 2 for p in partition):
+            partition[partition_id].append(event_id)
+        n_ev = sum(len(p) for p in partition)
+
+    orders = []
+    for i, p in enumerate(partition):
+        if len(p) == 2:
+            orders.append({"partition": i,"event_id": p[0],"role": "flash_sale"})
+            orders.append({"partition": i,"event_id": p[1], "role": "victim"})
+        else:
+            orders.append({"partition": i,"event_id": p[0], "role": "normal"})
+
+    calculated_order = partition[0][0]
+    assert buy(calculated_order)["partition"] == 0, f"partition formula has an error"
+    return orders
 
 if __name__ == "__main__":
-    print(buy(new_event("stess")))
+    plan = plan_events()
+    print(plan)
