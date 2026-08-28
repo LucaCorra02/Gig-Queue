@@ -208,7 +208,9 @@ services:
 
   inventory-service:
     build: ./services/inventory-service
-    container_name: inventory-service
+    # container_name: inventory-service
+    deploy:
+      replicas: 3
     restart: on-failure
     depends_on:
       kafka-init: { condition: service_completed_successfully }
