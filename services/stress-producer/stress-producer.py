@@ -4,10 +4,12 @@ import time
 import uuid
 import requests
 import zlib
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 API_URL = os.getenv("API_URL", "http://localhost:8080")
 PARTITIONS = int(os.getenv("PARTITIONS", 3))
-session = requests.Session()
+CONCURRENCY = int(os.getenv("CONCURRENCY", 40))
 
 def new_ip():
     return f"10.{random.randint(0, 255)}.{random.randint(0, 255)}.{random.randint(1, 254)}"
@@ -44,7 +46,7 @@ def buy(event_id, user_id=None, ip=None, quantity=1):
     }
     started = time.time()
     try:
-        response = session.post(
+        response = get_session().post(
             f"{API_URL}/buy",
             json={"event_id": record["event"],
                   "user_id": record["user"],
@@ -64,7 +66,18 @@ def buy(event_id, user_id=None, ip=None, quantity=1):
         record["order_id"] = body["order_id"]
         record["partition"] = body["partition"]
         record["offset"] = body["offset"]
+        record["acked_at"] = time.time()
     return record
+
+_local = threading.local()
+
+def get_session():
+    if not hasattr(_local, "session"): #each thread has its own session to avoid conflicts
+        _local.session = requests.Session()
+        _local.session.mount(
+            "http://", requests.adapters.HTTPAdapter(pool_maxsize=64)
+        )
+    return _local.session
 
 def get_partition(event_id, partitions=PARTITIONS):
     return zlib.crc32(event_id.encode()) % partitions
@@ -98,6 +111,19 @@ def plan_events(partitions=PARTITIONS):
     assert buy(calculated_order)["partition"] == 0, f"partition formula has an error"
     return orders
 
+def buyers_pool(jobs, concurrency=CONCURRENCY): # multiple costumers buying tickets concurrently
+    started = time.time()
+    with ThreadPoolExecutor(max_workers=concurrency) as executor:
+        results = list(executor.map(lambda job: buy(**job), jobs))
+    return results, time.time() - started
+
 if __name__ == "__main__":
     plan = plan_events()
     print(plan)
+
+    jobs = [{"event_id": plan[0]["event_id"], "quantity": 1} for _ in range(50)]
+    records, elapsed = buyers_pool(jobs)
+    codes = {}
+    for r in records:
+        codes[r["status_code"]] = codes.get(r["status_code"], 0) + 1
+    print(f"{len(records)} requests in {elapsed:.1f}s -> {codes}")
