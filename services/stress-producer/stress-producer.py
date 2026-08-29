@@ -189,18 +189,17 @@ def print_waits(plan, waits):
     For each event return a list of tuples with
     the first and last seat for each confirmed order
 """
-def get_seats_per_event(records, outcomes):
+def get_seats_per_event(outcomes):
     seats_per_event = {}
     rejected_order_per_event = {}
-    for record in records:
-        event_id = record.get("event")
-        record_order_id = record.get("order_id")
-        order_info = outcomes.get(record_order_id)
-        if not order_info: continue
-        if order_info["status"] == "confirmed":
-            seats_per_event.setdefault(event_id, []).append((order_info["seat"], order_info["last_seat"]))
-        elif order_info["status"] == "rejected":
-            rejected_order_per_event.setdefault(event_id, []).append(record["order_id"])
+    for order_id, outcome in outcomes.items():
+        if not outcome: continue
+        event_id = outcome.get("event_id")
+        if outcome["status"] == "confirmed":
+            seats_per_event.setdefault(event_id, []).append((outcome["seat"], outcome["last_seat"]))
+        elif outcome["status"] == "rejected":
+            rejected_order_per_event.setdefault(event_id, []).append(order_id)
+
     return seats_per_event, rejected_order_per_event
 
 def check_progressive_seats(seats_per_event):
@@ -214,6 +213,35 @@ def check_progressive_seats(seats_per_event):
                 break
     if ok:
         print("All events have progressive seats")
+    return ok
+
+def join_dict(records, outcomes): # modify outcomes dict
+    for record in records:
+        order_id = record.get("order_id")
+        if not order_id: continue
+        body_order = outcomes.get(order_id)
+        if not body_order: continue
+        body_order.setdefault("event_id", record["event"])
+        body_order.setdefault("offset", record["offset"])
+
+"""
+    since all the events order are in the same partition
+    we can check if the order of the offsets is the same as the order of the seats
+"""
+def check_fifo_oder(outcomes): # needs to be called after join_dict
+    by_event = {}
+    for outcome in sorted(outcomes.values(), key=lambda o: o.get("offset", 0)):
+        if outcome["status"] != "confirmed": continue
+        by_event.setdefault(outcome["event_id"], []).append(outcome["seat"])
+
+    ok = True
+    for event_id, seats in by_event.items():
+        if seats != sorted(seats):
+            print(f"{event_id}: seats do not follow the log order")
+            ok = False
+    if ok:
+        print(f"seats follow the log order in {len(by_event)} event(s)")
+    return ok
 
 
 if __name__ == "__main__":
@@ -254,5 +282,7 @@ if __name__ == "__main__":
 
     print(f"missing: {missing}")
     print_waits(plan, queue_waits(records, outcomes))
-    seats_per_event, rejected_order_per_event = get_seats_per_event(records, outcomes)
+    join_dict(records, outcomes) # add event_id and offset to outcomes
+    seats_per_event, rejected_order_per_event = get_seats_per_event(outcomes)
     check_progressive_seats(seats_per_event)
+    check_fifo_oder(outcomes)
