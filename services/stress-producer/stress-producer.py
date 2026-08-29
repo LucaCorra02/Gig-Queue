@@ -191,16 +191,13 @@ def print_waits(plan, waits):
 """
 def get_seats_per_event(outcomes):
     seats_per_event = {}
-    rejected_order_per_event = {}
     for order_id, outcome in outcomes.items():
         if not outcome: continue
         event_id = outcome.get("event_id")
         if outcome["status"] == "confirmed":
             seats_per_event.setdefault(event_id, []).append((outcome["seat"], outcome["last_seat"]))
-        elif outcome["status"] == "rejected":
-            rejected_order_per_event.setdefault(event_id, []).append(order_id)
 
-    return seats_per_event, rejected_order_per_event
+    return seats_per_event
 
 def check_progressive_seats(seats_per_event):
     ok = True
@@ -243,6 +240,31 @@ def check_fifo_oder(outcomes): # needs to be called after join_dict
         print(f"seats follow the log order in {len(by_event)} event(s)")
     return ok
 
+def print_summary(records, outcomes):
+    codes = {} # HTTP status
+    for record in records:
+        key = record["status_code"] or record.get("error", "no response")
+        codes[key] = codes.get(key, 0) + 1
+
+    accepted = [r for r in records if r["order_id"]]
+    missing = [r for r in accepted if r["order_id"] not in outcomes]
+    print(f"Requests    : {len(records)}")
+    print(f"    by status   : {dict(sorted(codes.items(), key=str))}")
+
+    if missing:
+        print(f"    order lost: {len(missing)}")
+    else:
+        print(f"    order lost: 0 of {len(accepted)} accepted")
+
+    # for each event print the number of confirmed and rejected orders
+    assert len(missing) == 0
+    results = {}
+    for _, body in outcomes.items():
+        if body is None: continue
+        results.setdefault(body["event_id"], {"confirmed": 0, "rejected": 0})
+        results[body["event_id"]]["confirmed" if body["status"] == "confirmed" else "rejected"] += 1
+
+    print(f"    by event    : {results}")
 
 if __name__ == "__main__":
     plan = plan_events()
@@ -283,6 +305,7 @@ if __name__ == "__main__":
     print(f"missing: {missing}")
     print_waits(plan, queue_waits(records, outcomes))
     join_dict(records, outcomes) # add event_id and offset to outcomes
-    seats_per_event, rejected_order_per_event = get_seats_per_event(outcomes)
+    print_summary(records, outcomes)
+    seats_per_event = get_seats_per_event(outcomes)
     check_progressive_seats(seats_per_event)
     check_fifo_oder(outcomes)
