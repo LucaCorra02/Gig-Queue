@@ -27,7 +27,7 @@ def new_user():
 def new_event(prefix="ev"):
     return f"{prefix}-{uuid.uuid4().hex[:8]}"
 
-def random_quantity(min_qty=1, max_qty=5):
+def random_quantity(min_qty=1, max_qty=4):
     return random.randint(min_qty, max_qty)
 
 
@@ -42,7 +42,7 @@ def random_quantity(min_qty=1, max_qty=5):
     - latency: the time taken for the request in seconds
     - error: the error message if the request failed
 """
-def buy(event_id, user_id=None, ip=None, quantity=1):
+def buy(event_id, user_id=None, ip=None, quantity=None):
     record = {
         "event": event_id,
         "user": user_id or new_user(), # defaul is a new user avoid fradu
@@ -185,6 +185,36 @@ def print_waits(plan, waits):
         print(f"{row['role']} (partition {row['partition']}): "
               f"{len(values)} orders, median {median:.1f}s, max {values[-1]:.1f}s")
 
+"""
+    For each event return a list of tuples with
+    the first and last seat for each confirmed order
+"""
+def get_seats_per_event(records, outcomes):
+    seats_per_event = {}
+    rejected_order_per_event = {}
+    for record in records:
+        event_id = record.get("event")
+        record_order_id = record.get("order_id")
+        order_info = outcomes.get(record_order_id)
+        if not order_info: continue
+        if order_info["status"] == "confirmed":
+            seats_per_event.setdefault(event_id, []).append((order_info["seat"], order_info["last_seat"]))
+        elif order_info["status"] == "rejected":
+            rejected_order_per_event.setdefault(event_id, []).append(record["order_id"])
+    return seats_per_event, rejected_order_per_event
+
+def check_progressive_seats(seats_per_event):
+    ok = True
+    for event_id, seats in seats_per_event.items():
+        seats.sort(key=lambda x: x[0]) # sort by first seat
+        for i in range(1, len(seats)):
+            if seats[i][0] != seats[i-1][1] + 1:
+                print(f"Non-progressive seats for event {event_id}: {seats}")
+                ok = False
+                break
+    if ok:
+        print("All events have progressive seats")
+
 
 if __name__ == "__main__":
     plan = plan_events()
@@ -207,12 +237,11 @@ if __name__ == "__main__":
     time.sleep(FLASH_DELAY_S)
 
     print(f"flash sale: {FLASH_REQUESTS} requests on {flash_event_id}")
-    jobs = [{"event_id": flash_event_id, "quantity": 1} for _ in range(FLASH_REQUESTS)]
+    jobs = [{"event_id": flash_event_id} for _ in range(FLASH_REQUESTS)]
     elapsed = buyers_pool(jobs, records)
     print(f"    sent in {elapsed:.1f}s")
 
     light.join() # wait for the light traffic to finish
-
 
     # wait for missing orders to be settled or timeout
     deadline = time.time() + SETTLE_TIMEOUT_S
@@ -225,3 +254,5 @@ if __name__ == "__main__":
 
     print(f"missing: {missing}")
     print_waits(plan, queue_waits(records, outcomes))
+    seats_per_event, rejected_order_per_event = get_seats_per_event(records, outcomes)
+    check_progressive_seats(seats_per_event)
