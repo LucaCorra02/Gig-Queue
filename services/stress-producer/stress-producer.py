@@ -16,7 +16,8 @@ LIGHT_REQUESTS = int(os.getenv("LIGHT_REQUESTS", 50))
 LIGHT_INTERVAL_S = float(os.getenv("LIGHT_INTERVAL_S", 0.5))
 FLASH_REQUESTS = int(os.getenv("FLASH_REQUESTS", 500))
 FLASH_DELAY_S = float(os.getenv("FLASH_DELAY_S", 3))
-
+BOT_REQUESTS = int(os.getenv("BOT_REQUESTS", 30))
+BOT_INTERVAL_S = float(os.getenv("BOT_INTERVAL_S", 0.3))
 
 def new_ip():
     return f"10.{random.randint(0, 255)}.{random.randint(0, 255)}.{random.randint(1, 254)}"
@@ -266,7 +267,29 @@ def print_summary(records, outcomes):
 
     print(f"    by event    : {results}")
 
-if __name__ == "__main__":
+def bot_attack_scenario():
+    event_id = new_event("bot")
+    user_id, ip = new_user(), new_ip()
+    print(f"    bot attack: {BOT_REQUESTS} requests from {user_id} at {ip}")
+
+    first_rejection = None
+    codes = []
+    for index in range(BOT_REQUESTS):
+        record = buy(event_id, user_id=user_id, ip=ip, quantity=1)
+        codes.append(record["status_code"])
+        if record["status_code"] == 403 and first_rejection is None:
+            first_rejection = index + 1
+        time.sleep(BOT_INTERVAL_S)
+
+    print(f"  accepted (202): {codes.count(202)}")
+    print(f"  refused  (403): {codes.count(403)}")
+    if first_rejection:
+        print(f"    bot was blocked at request #{first_rejection}")
+        return True
+    print(f"    bot was never blocked")
+    return False
+
+def flas_sale_scenario():
     plan = plan_events()
     flash_event_id = [p["event_id"] for p in plan if p["role"] == "flash_sale"][0]
     light_event_ids = [p["event_id"] for p in plan if p["role"] != "flash_sale"]
@@ -309,3 +332,9 @@ if __name__ == "__main__":
     seats_per_event = get_seats_per_event(outcomes)
     check_progressive_seats(seats_per_event)
     check_fifo_oder(outcomes)
+
+if __name__ == "__main__":
+    print("\n === flash sale scenario ===")
+    flas_sale_scenario()
+    print("\n === bot attack scenario ===")
+    bot_attack_scenario()
