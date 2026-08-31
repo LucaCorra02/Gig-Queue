@@ -334,6 +334,7 @@ def flas_sale_scenario():
     check_fifo_oder(outcomes)
 
 if __name__ == "__main__":
+    # docker compose --profile stress up stress-producer
     print("\n === flash sale scenario ===")
     flas_sale_scenario()
     print("\n === bot attack scenario ===")

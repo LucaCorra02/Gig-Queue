@@ -326,6 +326,22 @@ services:
       - ./security/dlq-monitor.key:/certs/client.key:ro,z
     networks: [ gig-net ]
 
+  stress-producer:
+    build: ./services/stress-producer
+    container_name: stress-producer
+    profiles: ["stress"]
+    depends_on:
+      ticket-api: { condition: service_healthy }
+    environment:
+      API_URL: http://ticket-api:8080
+      SCENARIO: flash-sale
+      FLASH_REQUESTS: 1500
+      LIGHT_REQUESTS: 200
+      LIGHT_INTERVAL_S: 0.4
+      # No Kafka client, no certificate, no ACL entry: this is a synthetic user,
+      # not a service. It exercises the system through the same door as a browser.
+    networks: [ gig-net ]
+
   # Kafka GUI
   akhq:
     image: tchiotludo/akhq:latest
