@@ -19,6 +19,7 @@ local qty = tonumber(ARGV[5]) -- how many tickets in this order
 -- check if the order has already been processed
 local previous = redis.call('GET', dedup_key)
 if previous then
+  redis.call('INCR', 'replays:total')  -- count redeliveries, for demo
   local remaining = tonumber(redis.call('GET', seats_key)) or 0
   local first, last = string.match(previous, "^(-?%d+):(-?%d+)$")
   return {tonumber(first), tonumber(last), remaining}

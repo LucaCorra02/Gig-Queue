@@ -19,6 +19,9 @@ FLASH_REQUESTS = int(os.getenv("FLASH_REQUESTS", 500))
 FLASH_DELAY_S = float(os.getenv("FLASH_DELAY_S", 3))
 BOT_REQUESTS = int(os.getenv("BOT_REQUESTS", 30))
 BOT_INTERVAL_S = float(os.getenv("BOT_INTERVAL_S", 0.3))
+REPLAY_SHIFT = int(os.getenv("REPLAY_SHIFT", 300))
+REPLAY_WAIT_S = int(os.getenv("REPLAY_WAIT_S", 60))
+
 
 def new_ip():
     return f"10.{random.randint(0, 255)}.{random.randint(0, 255)}.{random.randint(1, 254)}"
@@ -290,8 +293,12 @@ def bot_attack_scenario():
     print(f"    bot was never blocked")
     return False
 
+_last_events = [] # last events used in the idempotence scenario, to check that no seat is allocated twice
+
 def flash_sale_scenario(broker_failure=None, failure_delay_s=5):
     plan = plan_events()
+    _last_events.clear()
+    _last_events.extend(p["event_id"] for p in plan)
     flash_event_id = [p["event_id"] for p in plan if p["role"] == "flash_sale"][0]
     light_event_ids = [p["event_id"] for p in plan if p["role"] != "flash_sale"]
 
@@ -390,10 +397,84 @@ def broker_failure_scenario():
     print_partitions()
     return ok
 
+def redis_get(key):
+    result = subprocess.run(["docker", "exec", "redis", "redis-cli", "GET", key],
+                            capture_output=True, text=True)
+    return result.stdout.strip()
+
+"""
+    Move the group's bookmark backwards. Kafka only allows this while the
+    group is inactive, so the caller must stop the consumers first
+"""
+def reset_offsets(shift, group="group-inventory", topic="topic-requests"):
+    return subprocess.run(
+        ["docker", "exec", "kafka-1", "kafka-consumer-groups",
+         "--bootstrap-server", "kafka-1:9093",
+         "--command-config", "/etc/kafka/secrets/admin.properties",
+         "--group", group, "--topic", topic,
+         "--reset-offsets", "--shift-by", str(shift), "--execute"],
+        capture_output=True, text=True)
+
+"""
+    This scenario checks that the system is idempotent: if the same messages are redelivered, the state of the system does not change. It does this by:
+    - running a flash sale scenario and recording the state of the system (seats and queue_done) for each event
+    - stopping the inventory-service
+    - rewinding the group-inventory offsets by REPLAY_SHIFT
+    - restarting the inventory-service
+    - waiting for REPLAY_WAIT_S seconds for the redelivered messages to be processed
+    - checking that the state of the system (seats and queue_done) for each event is the same as before
+"""
+def replay_idempotence_scenario():
+
+    subprocess.run(["docker", "exec", "redis", "redis-cli", "DEL", "replays:total"], capture_output=True, text=True) # reset the replay counter
+    ok = flash_sale_scenario()
+
+    print("\n=== replay ===")
+    events = [k for k in _last_events]
+    before_seats = {e: redis_get(f"seats:{e}") for e in events}
+    before_done = {e: redis_get(f"queue_done:{e}") for e in events}
+
+    print(">>> stopping inventory-service")
+    docker_compose("stop", "inventory-service")
+    time.sleep(3)
+
+    print(f">>> rewinding group-inventory by {REPLAY_SHIFT} per partition")
+    result = reset_offsets(-REPLAY_SHIFT)
+    if result.returncode != 0:
+        print(f"    reset failed: {result.stderr.strip()}")
+        return False
+
+    print(">>> restarting inventory-service")
+    docker_compose("up", "-d", "inventory-service")
+
+    print(f">>> waiting {REPLAY_WAIT_S}s for the redelivered messages")
+    time.sleep(REPLAY_WAIT_S)
+    replays = int(redis_get("replays:total") or 0)
+    print(f"\n    messages redelivered : {replays}")
+
+    if replays == 0:
+        print(f"    Error nothing was replayed")
+        return False
+
+    for event in events:
+        seats_now = redis_get(f"seats:{event}")
+        done_now = redis_get(f"queue_done:{event}")
+        if seats_now != before_seats[event]:
+            print(f"    Error on {event}: seats {before_seats[event]} -> {seats_now}")
+            ok = False
+        elif done_now != before_done[event]:
+            print(f"    Error on {event}: queue_ one {before_done[event]} -> {done_now}")
+            ok = False
+        else:
+            print(f"    Ok {event}: seats and queue done unchanged" f"({seats_now} seats left)")
+    return ok
+
+
 SCENARIOS = {
     "flash-sale": flash_sale_scenario,
     "bot-attack": bot_attack_scenario,
     "broker-failure": broker_failure_scenario,
+    "replay-idempotence": replay_idempotence_scenario,
 }
 
 if __name__ == "__main__":
