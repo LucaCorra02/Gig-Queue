@@ -6,6 +6,7 @@ import requests
 import zlib
 import threading
 from concurrent.futures import ThreadPoolExecutor
+import subprocess
 
 API_URL = os.getenv("API_URL", "http://localhost:8080")
 PARTITIONS = int(os.getenv("PARTITIONS", 3))
@@ -289,7 +290,7 @@ def bot_attack_scenario():
     print(f"    bot was never blocked")
     return False
 
-def flas_sale_scenario():
+def flash_sale_scenario(broker_failure=None, failure_delay_s=5):
     plan = plan_events()
     flash_event_id = [p["event_id"] for p in plan if p["role"] == "flash_sale"][0]
     light_event_ids = [p["event_id"] for p in plan if p["role"] != "flash_sale"]
@@ -308,6 +309,8 @@ def flas_sale_scenario():
                                    LIGHT_INTERVAL_S, records))
     light.start()
     time.sleep(FLASH_DELAY_S)
+    if broker_failure:
+        run_after(delay=failure_delay_s, action=broker_failure)
 
     print(f"flash sale: {FLASH_REQUESTS} requests on {flash_event_id}")
     jobs = [{"event_id": flash_event_id} for _ in range(FLASH_REQUESTS)]
@@ -330,12 +333,77 @@ def flas_sale_scenario():
     join_dict(records, outcomes) # add event_id and offset to outcomes
     print_summary(records, outcomes)
     seats_per_event = get_seats_per_event(outcomes)
-    check_progressive_seats(seats_per_event)
-    check_fifo_oder(outcomes)
+    ok = check_progressive_seats(seats_per_event)
+    ok = check_fifo_oder(outcomes) and ok
+    return ok
+
+PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def docker_compose(*args):
+    return subprocess.run(["docker", "compose", *args],
+                          cwd=PROJECT_DIR, capture_output=True, text=True)
+
+def print_partitions(topic="topic-requests"):
+    """Leader and ISR straight from the broker: the visual part of the demo."""
+    result = subprocess.run(
+        ["docker", "exec", "kafka-1", "kafka-topics",
+         "--bootstrap-server", "kafka-1:9093",
+         "--command-config", "/etc/kafka/secrets/admin.properties",
+         "--describe", "--topic", topic],
+        capture_output=True, text=True)
+    for line in result.stdout.splitlines():
+        if "Partition:" in line:
+            print("   ", line.strip())
+
+"""
+    Fire "action" in the background after "delay" seconds
+"""
+def run_after(delay, action):
+    def wrapper():
+        time.sleep(delay)
+        action()
+    thread = threading.Thread(target=wrapper, daemon=True)
+    thread.start()
+    return thread
+
+"""
+    Kill a broker under load
+    none ack should be lost
+"""
+def broker_failure_scenario():
+    print("partition layout before:")
+    print_partitions()
+
+    def fail():
+        print(f">>> stopping kafka-2")
+        docker_compose("stop", "kafka-2")
+        time.sleep(2)
+        print(f">>> partition layout with kafka-2 down:")
+        print_partitions()
+        time.sleep(15)
+        print(">>> starting kafka-2")
+        docker_compose("start", "kafka-2")
+
+    ok = flash_sale_scenario(broker_failure=fail, failure_delay_s=8)
+    print("\npartition layout after recovery:")
+    print_partitions()
+    return ok
+
+SCENARIOS = {
+    "flash-sale": flash_sale_scenario,
+    "bot-attack": bot_attack_scenario,
+    "broker-failure": broker_failure_scenario,
+}
 
 if __name__ == "__main__":
-    # docker compose --profile stress up stress-producer
-    print("\n === flash sale scenario ===")
-    flas_sale_scenario()
-    print("\n === bot attack scenario ===")
-    bot_attack_scenario()
+    # FLASH_REQUESTS=1500 LIGHT_REQUESTS=120 LIGHT_INTERVAL_S=0.4 python3 stress-producer.py broker-failure
+    # docker compose --profile stress run --rm stress-producer python -u stress-producer.py broker-failure
+    import sys
+    name = sys.argv[1] if len(sys.argv) > 1 else os.getenv("SCENARIO", "flash-sale")
+    if name not in SCENARIOS:
+        sys.exit(f"unknown scenario '{name}'. Choose: {', '.join(SCENARIOS)}")
+    print(f"\n=== {name} ===")
+    raise SystemExit(0 if SCENARIOS[name]() else 1)
+    # for checking partition
+    # docker exec kafka-1 kafka-leader-election --bootstrap-server kafka-1:9093 --admin.config /etc/kafka/secrets/admin.properties --election-type preferred --all-topic-partitions
