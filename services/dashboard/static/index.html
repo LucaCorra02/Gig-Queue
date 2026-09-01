@@ -11,6 +11,7 @@
         href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap"
         rel="stylesheet">
     <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 
 <body>
@@ -53,6 +54,19 @@
                 </tbody>
             </table>
         </section>
+        <div class="split">
+            <section>
+                <h2>Throughput</h2>
+                <p class="hint">Orders settled per second across every event, sampled every two seconds.</p>
+                <canvas id="chart" height="170"></canvas>
+            </section>
+
+            <section>
+                <h2>Totals</h2>
+                <p class="hint">Counters kept by the services themselves.</p>
+                <div class="figures" id="figures"></div>
+            </section>
+        </div>
     </div>
 
     <script>
@@ -86,8 +100,15 @@
         async function refresh() {
             try {
                 const state = await (await fetch("/api/state")).json();
+                if (state.warming_up) {
+                    document.getElementById("status").innerHTML =
+                        `<b class="bad">${state.error || "warming up"}</b>`;
+                    return;
+                }
                 renderBoard(state.cluster);
                 renderQueues(state.events);
+                renderChart(state.throughput);
+                renderFigures(state);
             } catch (err) {
                 document.getElementById("status").innerHTML = `<b class="bad">console offline</b>`;
             }
@@ -116,7 +137,7 @@
                 body.innerHTML = `<tr><td colspan="6" class="empty">${events.length ? "all events hidden" : "no event yet"}</td></tr>`;
                 return;
             }
-            body.innerHTML = events.map(e => {
+            body.innerHTML = visible.map(e => {
                 const pct = e.total ? Math.min(100, Math.round(100 * e.sold / e.total)) : 0;
                 return `<tr class="${e.active ? "" : "idle"}">
                     <td>${e.id}
@@ -129,6 +150,58 @@
                     <td class="r num">${e.seats_left}</td>
                     </tr>`;
             }).join("");
+        }
+
+        let chart = null;
+
+        function renderChart(history) {
+            const values = history.map(p => p.rate);
+            if (!chart) {
+                chart = new Chart(document.getElementById("chart"), {
+                    type: "line",
+                    data: {
+                        labels: values.map((_, i) => i),
+                        datasets: [{
+                            data: values, borderColor: "#E9A33C",
+                            backgroundColor: "rgba(233,163,60,.12)",
+                            borderWidth: 2, pointRadius: 0, fill: true, tension: .25,
+                        }],
+                    },
+                    options: {
+                        animation: false, responsive: true,
+                        plugins: { legend: { display: false } },
+                        scales: {
+                            x: { display: false },
+                            y: {
+                                beginAtZero: true, grid: { color: "#27323F" },
+                                ticks: { color: "#7C8CA0", font: { family: "IBM Plex Mono", size: 11 } },
+                            },
+                        },
+                    },
+                });
+            } else {
+                chart.data.labels = values.map((_, i) => i);
+                chart.data.datasets[0].data = values;
+                chart.update("none");
+            }
+        }
+
+        function fig(value, label, sub) {
+            return `<div class="fig"><div class="v num">${value}</div>
+            <div class="k">${label}</div>
+            ${sub ? `<div class="sub">${sub}</div>` : ""}</div>`;
+        }
+
+        function renderFigures(state) {
+            const pairs = obj => Object.entries(obj).map(([k, v]) => `${k} ${v}`).join(" · ");
+            const members = state.groups.reduce((n, g) => n + g.members, 0);
+            document.getElementById("figures").innerHTML =
+                fig(state.dlq.count, "Dead letters", pairs(state.dlq.by_service) || "none yet")
+                + fig(state.notifications.count, "Emails sent", pairs(state.notifications.by_kind) || "none yet")
+                + fig(state.fraud.blocked_users, "Blocked users", `${state.fraud.blocked_ips} addresses`)
+                + fig(state.replays, "Replays absorbed", "redelivered, allocated once")
+                + fig(members || "—", "Consumers",
+                    state.groups.map(g => g.id.replace("group-", "")).join(" · ") || "unavailable");
         }
 
         document.getElementById("hide").onclick = () => {

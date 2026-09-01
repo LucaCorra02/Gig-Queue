@@ -288,3 +288,49 @@ tr.idle {
 tr.hidden {
     display: none
 }
+
+.figures {
+    display: flex;
+    flex-wrap: wrap;
+    border: 1px solid var(--rule);
+    background: var(--panel)
+}
+
+.fig {
+    flex: 1 1 150px;
+    padding: 14px 16px;
+    border-right: 1px solid var(--rule)
+}
+
+.fig:last-child {
+    border-right: 0
+}
+
+.fig .v {
+    font-size: 26px;
+    color: var(--amber)
+}
+
+.fig .k {
+    font-size: 14px;
+    color: var(--muted)
+}
+
+.fig .sub {
+    font-size: 13px;
+    color: var(--muted);
+    margin-top: 2px
+}
+
+.split {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 30px;
+    align-items: start
+}
+
+@media (max-width: 900px) {
+    .split {
+        grid-template-columns: 1fr
+    }
+}
