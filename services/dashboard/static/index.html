@@ -211,6 +211,54 @@
         .node.off .role {
             color: var(--down)
         }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 15px;
+            margin-top: 4px
+        }
+
+        th {
+            text-align: left;
+            font-weight: 500;
+            color: var(--muted);
+            padding: 0 10px 7px 0;
+            border-bottom: 1px solid var(--rule)
+        }
+
+        td {
+            padding: 10px 10px 10px 0;
+            border-bottom: 1px solid rgba(39, 50, 63, .55)
+        }
+
+        th.r,
+        td.r {
+            text-align: right;
+            padding-right: 0
+        }
+
+        tr.idle {
+            opacity: .45
+        }
+
+        .ev {
+            font-size: 14px;
+            color: var(--muted)
+        }
+
+        .bar {
+            height: 5px;
+            background: var(--rule);
+            margin-top: 6px;
+            max-width: 260px
+        }
+
+        .bar span {
+            display: block;
+            height: 100%;
+            background: var(--amber)
+        }
     </style>
 </head>
 
@@ -228,6 +276,28 @@
             <div class="board" id="board">
                 <div class="empty">waiting for the first reading</div>
             </div>
+        </section>
+        <section>
+            <h2>Queues</h2>
+            <p class="hint">Counters written by the services. Ahead is seq &minus; done;
+                the estimate divides it by the rate observed over the last minute.</p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Event</th>
+                        <th class="r">Ahead</th>
+                        <th class="r">Served</th>
+                        <th class="r">Rate</th>
+                        <th class="r">Est.</th>
+                        <th class="r">Seats left</th>
+                    </tr>
+                </thead>
+                <tbody id="queues">
+                    <tr>
+                        <td colspan="6" class="empty">no event yet</td>
+                    </tr>
+                </tbody>
+            </table>
         </section>
     </div>
 
@@ -263,6 +333,7 @@
             try {
                 const state = await (await fetch("/api/state")).json();
                 renderBoard(state.cluster);
+                renderQueues(state.events);
             } catch (err) {
                 document.getElementById("status").innerHTML = `<b class="bad">console offline</b>`;
             }
@@ -277,6 +348,27 @@
                     ? `leads ${b.leading} ${b.leading === 1 ? "partition" : "partitions"}`
                     : "no replicas served"}</div>
                 </div>`).join("");
+        }
+
+        function renderQueues(events) {
+            const body = document.getElementById("queues");
+            if (!events.length) {
+                body.innerHTML = `<tr><td colspan="6" class="empty">no event yet</td></tr>`;
+                return;
+            }
+            body.innerHTML = events.map(e => {
+                const pct = e.total ? Math.min(100, Math.round(100 * e.sold / e.total)) : 0;
+                return `<tr class="${e.active ? "" : "idle"}">
+                    <td>${e.id}
+                        <div class="bar"><span style="width:${pct}%"></span></div>
+                        <div class="ev">${e.sold} of ${e.total} seats sold</div></td>
+                    <td class="r num">${e.ahead}</td>
+                    <td class="r num">${e.done}</td>
+                    <td class="r num">${e.rate.toFixed(1)}/s</td>
+                    <td class="r num">${e.eta === null ? "—" : e.eta + "s"}</td>
+                    <td class="r num">${e.seats_left}</td>
+                    </tr>`;
+            }).join("");
         }
 
         refresh();
