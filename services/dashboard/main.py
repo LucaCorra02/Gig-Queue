@@ -7,6 +7,7 @@ import redis.asyncio as redis
 import time
 from collections import deque
 from fastapi.staticfiles import StaticFiles
+from contextlib import asynccontextmanager
 
 KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP", "kafka-1:9093")
 KAFKA_SECURITY = {}
@@ -19,9 +20,18 @@ if os.getenv("KAFKA_SECURITY_PROTOCOL", "PLAINTEXT").upper() == "SSL":
     }
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
-MAX_EVENTS = int(os.getenv("MAX_EVENTS", 8))
+MAX_EVENTS = int(os.getenv("MAX_EVENTS", 8)) # maximum number of events to display in the dashboard
+SAMPLE_INTERVAL_S = float(os.getenv("SAMPLE_INTERVAL_S", 2)) # update the samples every N seconds
+HISTORY_POINTS = int(os.getenv("HISTORY_POINTS", 90)) # number of history points to keep for each event used for eta and rate
 admin = AdminClient({"bootstrap.servers": KAFKA_BOOTSTRAP, **KAFKA_SECURITY})
-app = FastAPI(title="Gig-Queue console")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    sampler_task = asyncio.create_task(get_sample()) #startup
+    yield
+    sampler_task.cancel()
+
+app = FastAPI(title="Gig-Queue console", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 rdb = redis.from_url(REDIS_URL, decode_responses=True)
 
@@ -138,11 +148,47 @@ async def read_events():
     events.sort(key=lambda e: (not e["active"], -e["ahead"], -e["rate"], e["id"]))
     return events[:MAX_EVENTS]
 
+throughput_history = deque(maxlen=HISTORY_POINTS) # keep the last N throughput samples for the dashboard
+snapshot = {"ts": None} # current state of the system
+
+async def read_data():
+    cluster, events = await asyncio.gather(
+        asyncio.to_thread(read_cluster),
+        read_events(),
+    )
+    # TODO add counter notifier and total counters
+    throughput_history.append({
+        "t": time.time(),
+        "rate": round(sum(e["rate"] for e in events), 2) # total processing rate of all events
+    })
+
+    snapshot.update({
+        "ts": time.time(),
+        "cluster": cluster,
+        "events": events,
+        "throughput": list(throughput_history),
+    })
+
+"""
+    Background task that reads the cluster and events data every SAMPLE_INTERVAL_S seconds
+    and updates the snapshot dictionary with the latest state of the system
+"""
+async def get_sample():
+    while True:
+        try:
+            await read_data()
+        except Exception as exc:
+            snapshot["error"] = str(exc)
+        else:
+            snapshot.pop("error", None)
+        await asyncio.sleep(SAMPLE_INTERVAL_S)
+
+
 @app.get("/api/state")
 async def state():
-    cluster = await asyncio.to_thread(read_cluster)
-    events = await read_events()
-    return {"cluster": cluster, "events": events}
+    if snapshot["ts"] is None:
+        return {"ts": None, "warming_up": True}
+    return snapshot
 
 @app.get("/healthz")
 async def healthz():
