@@ -342,6 +342,30 @@ services:
       # not a service. It exercises the system through the same door as a browser.
     networks: [ gig-net ]
 
+  dashboard:
+    build: ./services/dashboard
+    container_name: dashboard
+    ports:
+      - "8081:8080"
+    depends_on:
+      kafka-init: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+    environment:
+      KAFKA_BOOTSTRAP: kafka-1:9093,kafka-2:9095,kafka-3:9097
+      REDIS_URL: redis://redis:6379/0
+      KAFKA_SECURITY_PROTOCOL: SSL
+      KAFKA_SSL_CA: /certs/ca.crt
+      KAFKA_SSL_CERT: /certs/client.crt
+      KAFKA_SSL_KEY: /certs/client.key
+      DEMO_SCRIPT: /app/scenarios/stress-producer.py # only flash sale and bot attack
+      API_URL: http://ticket-api:8080
+    volumes:
+      - ./security/ca.crt:/certs/ca.crt:ro,z
+      - ./security/dashboard.crt:/certs/client.crt:ro,z
+      - ./security/dashboard.key:/certs/client.key:ro,z
+      - ./services/stress-producer/stress-producer.py:/app/scenarios/stress-producer.py:ro,z
+    networks: [ gig-net ]
+
   # Kafka GUI
   akhq:
     image: tchiotludo/akhq:latest
