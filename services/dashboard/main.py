@@ -20,7 +20,7 @@ if os.getenv("KAFKA_SECURITY_PROTOCOL", "PLAINTEXT").upper() == "SSL":
     }
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
-MAX_EVENTS = int(os.getenv("MAX_EVENTS", 8)) # maximum number of events to display in the dashboard
+MAX_EVENTS = int(os.getenv("MAX_EVENTS", 4)) # maximum number of events to display in the dashboard
 SAMPLE_INTERVAL_S = float(os.getenv("SAMPLE_INTERVAL_S", 2)) # update the samples every N seconds
 HISTORY_POINTS = int(os.getenv("HISTORY_POINTS", 90)) # number of history points to keep for each event used for eta and rate
 admin = AdminClient({"bootstrap.servers": KAFKA_BOOTSTRAP, **KAFKA_SECURITY})
@@ -148,25 +148,75 @@ async def read_events():
     events.sort(key=lambda e: (not e["active"], -e["ahead"], -e["rate"], e["id"]))
     return events[:MAX_EVENTS]
 
+"""
+    Read the counters from redis system, like total emailed, total replays, total blocked users and ips, etc.
+"""
+async def read_counters():
+    dlq_keys = await scan_keys("dlq:by_service:*")
+    kind_keys = await scan_keys("notifications:by_kind:*")
+
+    pipe = rdb.pipeline()
+    pipe.get("dlq:count")
+    pipe.lrange("dlq:recent", 0, 9)
+    pipe.get("notifications:count")
+    pipe.get("replays:total")
+    for key in dlq_keys + kind_keys: pipe.get(key)
+    values = await pipe.execute() #wait for all the values to be fetched from redis
+
+    dlq_count, dlq_recent, notified, replays = values[:4] # fixed values
+    tail = values[4:] # dynamic values
+    by_service = {k.rsplit(":", 1)[1]: int(v or 0)
+                  for k, v in zip(dlq_keys, tail[:len(dlq_keys)])}
+    by_kind = {k.rsplit(":", 1)[1]: int(v or 0)
+               for k, v in zip(kind_keys, tail[len(dlq_keys):])}
+    return {
+        "dlq": {"count": int(dlq_count or 0), "by_service": by_service, "recent": dlq_recent},
+        "notifications": {"count": int(notified or 0), "by_kind": by_kind},
+        "fraud": {"blocked_users": len(await scan_keys("blocked:user:*")),
+                  "blocked_ips": len(await scan_keys("blocked:ip:*"))},
+        "replays": int(replays or 0),
+    }
+
+"""
+    return group membership information from kafka
+"""
+def read_groups():
+    try:
+        listing = admin.list_consumer_groups(timeout=10).result()
+        ids = [g.group_id for g in listing.valid if g.group_id.startswith("group-")]
+        if not ids: return []
+        described = admin.describe_consumer_groups(ids)
+        groups = []
+        for group_id, future in described.items():
+            info = future.result(timeout=10)
+            groups.append({"id": group_id, "members": len(info.members)})
+        return sorted(groups, key=lambda g: g["id"])
+    except Exception:
+        return []
+
 throughput_history = deque(maxlen=HISTORY_POINTS) # keep the last N throughput samples for the dashboard
 snapshot = {"ts": None} # current state of the system
 
 async def read_data():
-    cluster, events = await asyncio.gather(
+    cluster, groups, events, counters = await asyncio.gather(
         asyncio.to_thread(read_cluster),
+        asyncio.to_thread(read_groups),
         read_events(),
+        read_counters(),
     )
-    # TODO add counter notifier and total counters
+
     throughput_history.append({
         "t": time.time(),
-        "rate": round(sum(e["rate"] for e in events), 2) # total processing rate of all events
+        "rate": round(sum(e["rate"] for e in events), 2),
     })
 
     snapshot.update({
         "ts": time.time(),
         "cluster": cluster,
+        "groups": groups,
         "events": events,
         "throughput": list(throughput_history),
+        **counters,
     })
 
 """
@@ -187,7 +237,7 @@ async def get_sample():
 @app.get("/api/state")
 async def state():
     if snapshot["ts"] is None:
-        return {"ts": None, "warming_up": True}
+        return {"ts": None, "warming_up": True, "error": snapshot.get("error")}
     return snapshot
 
 @app.get("/healthz")
