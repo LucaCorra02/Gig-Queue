@@ -19,7 +19,6 @@
             <h1>Gig-Queue</h1>
             <div class="status" id="status">connecting</div>
         </header>
-
         <section>
             <h2>Cluster</h2>
             <div class="nodes" id="nodes"></div>
@@ -30,6 +29,10 @@
         </section>
         <section>
             <h2>Queues</h2>
+            <div class="tools">
+                <button id="hide">Hide current events</button>
+                <button id="show">Show all</button>
+            </div>
             <p class="hint">Counters written by the services. Ahead is seq &minus; done;
                 the estimate divides it by the rate observed over the last minute.</p>
             <table>
@@ -101,10 +104,16 @@
                 </div>`).join("");
         }
 
+        let hidden = new Set();
+        let lastEvents = [];
+
         function renderQueues(events) {
+            lastEvents = events;
+            const visible = events.filter(e => !hidden.has(e.id));
             const body = document.getElementById("queues");
-            if (!events.length) {
-                body.innerHTML = `<tr><td colspan="6" class="empty">no event yet</td></tr>`;
+
+            if (!visible.length) {
+                body.innerHTML = `<tr><td colspan="6" class="empty">${events.length ? "all events hidden" : "no event yet"}</td></tr>`;
                 return;
             }
             body.innerHTML = events.map(e => {
@@ -121,6 +130,16 @@
                     </tr>`;
             }).join("");
         }
+
+        document.getElementById("hide").onclick = () => {
+            lastEvents.forEach(e => hidden.add(e.id));
+            renderQueues(lastEvents);
+        };
+
+        document.getElementById("show").onclick = () => {
+            hidden.clear();
+            renderQueues(lastEvents);
+        };
 
         refresh();
         setInterval(refresh, 2000);
