@@ -6,6 +6,7 @@ from fastapi.responses import FileResponse
 import redis.asyncio as redis
 import time
 from collections import deque
+from fastapi.staticfiles import StaticFiles
 
 KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP", "kafka-1:9093")
 KAFKA_SECURITY = {}
@@ -17,10 +18,11 @@ if os.getenv("KAFKA_SECURITY_PROTOCOL", "PLAINTEXT").upper() == "SSL":
         "ssl.key.location": os.getenv("KAFKA_SSL_KEY", "/certs/client.key"),
     }
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
-admin = AdminClient({"bootstrap.servers": KAFKA_BOOTSTRAP, **KAFKA_SECURITY})
-app = FastAPI(title="Gig-Queue console")
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 MAX_EVENTS = int(os.getenv("MAX_EVENTS", 8))
+admin = AdminClient({"bootstrap.servers": KAFKA_BOOTSTRAP, **KAFKA_SECURITY})
+app = FastAPI(title="Gig-Queue console")
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 rdb = redis.from_url(REDIS_URL, decode_responses=True)
 
 """
