@@ -139,7 +139,7 @@
             }
             body.innerHTML = visible.map(e => {
                 const pct = e.total ? Math.min(100, Math.round(100 * e.sold / e.total)) : 0;
-                return `<tr class="${e.active ? "" : "idle"}">
+                return `<tr class="${e.stalled ? "stalled" : e.active ? "" : "idle"}">
                     <td>${e.id}
                         <div class="bar"><span style="width:${pct}%"></span></div>
                         <div class="ev">${e.sold} of ${e.total} seats sold</div></td>
@@ -194,7 +194,10 @@
 
         function renderFigures(state) {
             const pairs = obj => Object.entries(obj).map(([k, v]) => `${k} ${v}`).join(" · ");
-            const members = state.groups.reduce((n, g) => n + g.members, 0);
+            //const members = state.groups.reduce((n, g) => n + g.members, 0);
+            const inventory = state.groups.find(g => g.id === "group-inventory");
+            const members = inventory ? inventory.members : 0;
+
             document.getElementById("figures").innerHTML =
                 fig(state.dlq.count, "Dead letters", pairs(state.dlq.by_service) || "none yet")
                 + fig(state.notifications.count, "Emails sent", pairs(state.notifications.by_kind) || "none yet")
@@ -202,6 +205,11 @@
                 + fig(state.replays, "Replays absorbed", "redelivered, allocated once")
                 + fig(members || "—", "Consumers",
                     state.groups.map(g => g.id.replace("group-", "")).join(" · ") || "unavailable");
+                + `<div class="fig ${members === 0 ? "warn" : ""}">
+                    <div class="v num">${members}</div>
+                    <div class="k">Inventory consumers</div>
+                    <div class="sub">${members === 0 ? "queue is not moving" : "one per partition"}</div>
+                </div>`;
         }
 
         document.getElementById("hide").onclick = () => {

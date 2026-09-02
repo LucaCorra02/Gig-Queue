@@ -195,7 +195,8 @@ def read_groups():
             info = future.result(timeout=10)
             groups.append({"id": group_id, "members": len(info.members)})
         return sorted(groups, key=lambda g: g["id"])
-    except Exception:
+    except Exception as exc:
+        print(f"read_groups failed: {exc!r}", flush=True)
         return []
 
 throughput_history = deque(maxlen=HISTORY_POINTS) # keep the last N throughput samples for the dashboard

@@ -334,3 +334,11 @@ tr.hidden {
         grid-template-columns: 1fr
     }
 }
+
+tr.stalled td {
+    color: var(--down)
+}
+
+.fig.warn .v {
+    color: var(--down)
+}
