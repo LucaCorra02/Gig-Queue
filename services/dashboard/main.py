@@ -1,13 +1,15 @@
 import asyncio
 import os
 from confluent_kafka.admin import AdminClient
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 import redis.asyncio as redis
 import time
 from collections import deque
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
+import sys
+import logging
 
 KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP", "kafka-1:9093")
 KAFKA_SECURITY = {}
@@ -23,11 +25,15 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 MAX_EVENTS = int(os.getenv("MAX_EVENTS", 4)) # maximum number of events to display in the dashboard
 SAMPLE_INTERVAL_S = float(os.getenv("SAMPLE_INTERVAL_S", 2)) # update the samples every N seconds
 HISTORY_POINTS = int(os.getenv("HISTORY_POINTS", 90)) # number of history points to keep for each event used for eta and rate
+DEMO_SCRIPT = os.getenv("DEMO_SCRIPT", "")
+SAFE_SCENARIOS = ("flash-sale", "bot-attack") # demo scenarios
+
 admin = AdminClient({"bootstrap.servers": KAFKA_BOOTSTRAP, **KAFKA_SECURITY})
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    sampler_task = asyncio.create_task(get_sample()) #startup
+    logging.getLogger("uvicorn.access").disabled = True
+    sampler_task = asyncio.create_task(get_sample())
     yield
     sampler_task.cancel()
 
@@ -147,6 +153,7 @@ async def read_events():
             "rate": round(rate, 2),
             "eta": round(ahead / estimate, 1) if ahead and estimate > 0.05 else None,
             "active": ahead > 0 or rate > 0.05,
+            "stalled": ahead > 5 and rate < 0.05 and len(window) >= 5,
         })
     # recent attivity first
     events.sort(key=lambda e: (not e["active"], -e["ahead"], -e["rate"], e["id"]))
@@ -186,10 +193,10 @@ async def read_counters():
 """
 def read_groups():
     try:
-        listing = admin.list_consumer_groups(timeout=10).result()
+        listing = admin.list_consumer_groups(request_timeout=10).result(timeout=10)
         ids = [g.group_id for g in listing.valid if g.group_id.startswith("group-")]
         if not ids: return []
-        described = admin.describe_consumer_groups(ids)
+        described = admin.describe_consumer_groups(ids, request_timeout=10)
         groups = []
         for group_id, future in described.items():
             info = future.result(timeout=10)
@@ -222,6 +229,11 @@ async def read_data():
         "events": events,
         "throughput": list(throughput_history),
         **counters,
+        "demo": {
+            "available": list(SAFE_SCENARIOS) if DEMO_SCRIPT else [],
+            "running": demo["running"],
+            "last": demo["last"],
+        },
     })
 
 """
@@ -237,6 +249,36 @@ async def get_sample():
         else:
             snapshot.pop("error", None)
         await asyncio.sleep(SAMPLE_INTERVAL_S)
+
+demo = {"running": None, "started_at": None, "last": None}
+
+"""
+    Run a test scenario as a child process
+    stoud is visible in the console logs `docker compose logs -f dashboard`
+"""
+async def run_scenario(name):
+    demo["running"] = name
+    demo["started_at"] = time.time()
+    try:
+        process = await asyncio.create_subprocess_exec(
+            sys.executable, "-u", DEMO_SCRIPT, name)
+        code = await process.wait()
+        demo["last"] = {"scenario": name, "exit_code": code, "at": time.time()}
+    except Exception as exc:
+        demo["last"] = {"scenario": name, "error": repr(exc), "at": time.time()}
+    finally:
+        demo["running"] = None
+
+@app.post("/api/demo/{name}")
+async def start_demo(name: str):
+    if not DEMO_SCRIPT:
+        raise HTTPException(400, "no scenario")
+    if name not in SAFE_SCENARIOS:
+        raise HTTPException(403, "this scenario needs Docker privileges")
+    if demo["running"]:
+        raise HTTPException(409, f"{demo['running']} is still running")
+    asyncio.create_task(run_scenario(name)) # run the scenario in the background
+    return {"started": name}
 
 
 @app.get("/api/state")

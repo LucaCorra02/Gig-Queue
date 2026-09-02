@@ -222,7 +222,7 @@ services:
       TOPIC_DLQ: topic-dlq
       GROUP_ID: group-inventory
       REDIS_URL: redis://redis:6379/0
-      SEATS_PER_EVENT: 1000 # TODO: increase for demo
+      SEATS_PER_EVENT: 3000 # TODO: increase for demo
       MAX_QUANTITY: 6
       KAFKA_SECURITY_PROTOCOL: SSL
       KAFKA_SSL_CA: /certs/ca.crt
@@ -359,6 +359,7 @@ services:
       KAFKA_SSL_KEY: /certs/client.key
       DEMO_SCRIPT: /app/scenarios/stress-producer.py # only flash sale and bot attack
       API_URL: http://ticket-api:8080
+      PARTITIONS: 3
     volumes:
       - ./security/ca.crt:/certs/ca.crt:ro,z
       - ./security/dashboard.crt:/certs/client.crt:ro,z
