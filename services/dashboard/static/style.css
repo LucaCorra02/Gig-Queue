@@ -342,3 +342,79 @@ tr.stalled td {
 .fig.warn .v {
     color: var(--down)
 }
+
+.demos {
+    border: 1px solid var(--rule)
+}
+
+.demo-row {
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--rule)
+}
+
+.demo-row:last-child {
+    border-bottom: 0
+}
+
+.demo-row>div {
+    flex: 1
+}
+
+.demo-name {
+    font-weight: 600
+}
+
+.demo-what {
+    color: var(--muted);
+    font-size: 14px;
+    margin-top: 2px
+}
+
+.demo-watch {
+    color: var(--muted);
+    font-size: 14px;
+    margin-top: 6px
+}
+
+.demo-cmd {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    background: rgba(0, 0, 0, .3);
+    color: var(--amber);
+    padding: 4px 8px;
+    display: inline-block;
+    margin-top: 7px;
+    user-select: all
+}
+
+.demo-row button {
+    font-family: inherit;
+    font-size: 14px;
+    color: var(--text);
+    background: transparent;
+    border: 1px solid var(--rule);
+    border-radius: 2px;
+    padding: 6px 16px;
+    cursor: pointer;
+    flex: 0 0 auto;
+    align-self: center;
+}
+
+.demo-row button:hover:not(:disabled) {
+    border-color: var(--amber);
+    color: var(--amber)
+}
+
+.demo-row button:disabled {
+    opacity: .4;
+    cursor: default
+}
+
+.demo-cmd {
+    white-space: pre-wrap;
+    word-break: break-all;
+    max-width: 100%
+}

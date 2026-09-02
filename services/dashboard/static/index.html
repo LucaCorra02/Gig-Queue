@@ -66,7 +66,16 @@
                 <p class="hint">Counters kept by the services themselves.</p>
                 <div class="figures" id="figures"></div>
             </section>
+
         </div>
+        <section>
+            <h2>Demos</h2>
+            <p class="hint">The first two only generate HTTP traffic, so the console runs
+                them and their output goes to <code>docker compose logs -f dashboard</code>.
+                The others stop or kill containers: this console holds a read-only
+                certificate and no access to the Docker daemon, so they run from a terminal.</p>
+            <div class="demos" id="demos"></div>
+        </section>
     </div>
 
     <script>
@@ -109,6 +118,7 @@
                 renderQueues(state.events);
                 renderChart(state.throughput);
                 renderFigures(state);
+                renderDemos(state);
             } catch (err) {
                 document.getElementById("status").innerHTML = `<b class="bad">console offline</b>`;
             }
@@ -203,13 +213,11 @@
                 + fig(state.notifications.count, "Emails sent", pairs(state.notifications.by_kind) || "none yet")
                 + fig(state.fraud.blocked_users, "Blocked users", `${state.fraud.blocked_ips} addresses`)
                 + fig(state.replays, "Replays absorbed", "redelivered, allocated once")
-                + fig(members || "—", "Consumers",
-                    state.groups.map(g => g.id.replace("group-", "")).join(" · ") || "unavailable");
                 + `<div class="fig ${members === 0 ? "warn" : ""}">
-                    <div class="v num">${members}</div>
-                    <div class="k">Inventory consumers</div>
-                    <div class="sub">${members === 0 ? "queue is not moving" : "one per partition"}</div>
-                </div>`;
+                     <div class="v num">${members || "—"}</div>
+                     <div class="k">Inventory consumers</div>
+                     <div class="sub">${members === 0 ? "queue is not moving" : "one per partition"}</div>
+                   </div>`;
         }
 
         document.getElementById("hide").onclick = () => {
@@ -221,6 +229,59 @@
             hidden.clear();
             renderQueues(lastEvents);
         };
+
+        const RUNNABLE = {
+            "flash-sale": ["Four events, one under a sudden rush.",
+                "Watch the event sharing the hot partition build a queue while the other two stay at zero."],
+            "bot-attack": ["One identity repeating until the edge refuses it.",
+                "Watch Blocked users go from 0 to 1 in Totals."],
+        };
+
+        const MANUAL = [
+            ["broker-failure", "Stops kafka-2 mid sale, then brings it back.",
+                "python3 stress-producer.py broker-failure",
+                "Watch a replica turn dashed on the board and a leader move. Orders lost must stay at zero."],
+            ["replay-idempotence", "Rewinds the consumer group so hundreds of messages arrive twice.",
+                "python3 stress-producer.py replay-idempotence",
+                "Watch Replays absorbed climb while Seats left does not move."],
+            ["mTLS rejection", "A plaintext client, a client with no certificate, a certificate from an unknown CA.",
+                "python3 scripts/demo_mtls.py",
+                "Every case is refused during the handshake, before any application byte."],
+            ["ACL rejection", "The dlq-monitor tries to publish a confirmed order.",
+                "python3 scripts/demo_acl.py",
+                "Authenticated, and still refused: TOPIC_AUTHORIZATION_FAILED."],
+        ];
+
+        function renderDemos(state) {
+            const running = state.demo.running;
+            const runnable = (state.demo.available || []).map(name => {
+                const [what, watch] = RUNNABLE[name];
+                return `<div class="demo-row">
+                    <div><div class="demo-name">${name}</div>
+                        <div class="demo-what">${what}</div>
+                        <div class="demo-watch">${watch}</div></div>
+                    <button data-run="${name}" ${running ? "disabled" : ""}>
+                        ${running === name ? "Running" : "Run"}</button>
+                    </div>`;
+            }).join("");
+
+            const manual = MANUAL.map(([name, what, cmd, watch]) => `
+                <div class="demo-row">
+                <div><div class="demo-name">${name}</div>
+                    <div class="demo-what">${what}</div>
+                    <div class="demo-cmd">${cmd}</div>
+                    <div class="demo-watch">${watch}</div></div>
+                </div>`).join("");
+
+            document.getElementById("demos").innerHTML = runnable + manual;
+            document.querySelectorAll("[data-run]").forEach(el => {
+                el.onclick = async () => {
+                    el.disabled = true;
+                    await fetch(`/api/demo/${el.dataset.run}`, { method: "POST" });
+                    refresh();
+                };
+            });
+        }
 
         refresh();
         setInterval(refresh, 2000);
