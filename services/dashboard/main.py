@@ -103,6 +103,7 @@ async def scan_keys(pattern, limit=500):
 
 # Contains the last current order status for each event, used to calculate the processing rate and ETA
 samples = {}
+last_rate = {}
 
 async def read_events():
     # get the active event ids from redis
@@ -130,6 +131,9 @@ async def read_events():
             elapsed = window[-1][0] - window[0][0]  # time elapsed between the first and last sample
             processed = window[-1][1] - window[0][1] #new done - old done
             rate = processed / elapsed if elapsed > 0 else 0.0
+        if rate > 0.05: # rate is significant
+            last_rate[event_id] = rate
+        estimate = rate if rate > 0.05 else last_rate.get(event_id, 0.0)
 
         ahead = max(seq - done, 0) # total orders - processed orders
         events.append({
@@ -141,7 +145,7 @@ async def read_events():
             "total": total,
             "sold": max(total - seats, 0),
             "rate": round(rate, 2),
-            "eta": round(ahead / rate, 1) if rate > 0.5 and ahead else None,
+            "eta": round(ahead / estimate, 1) if ahead and estimate > 0.05 else None,
             "active": ahead > 0 or rate > 0.05,
         })
     # recent attivity first
