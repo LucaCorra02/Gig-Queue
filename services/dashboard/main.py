@@ -190,25 +190,19 @@ async def read_counters():
 
 last_groups = []
 """
-    return group membership information from kafka
+    return group membership information from kafka api admin
 """
 def read_groups():
     global last_groups
     try:
-        listing = admin.list_consumer_groups(request_timeout=3).result(timeout=4)
-        ids = [g.group_id for g in listing.valid if g.group_id.startswith("group-")]
-        if not ids: return []
-        described = admin.describe_consumer_groups(ids, request_timeout=3)
-        groups = []
-        for group_id, future in described.items():
-            info = future.result(timeout=4)
-            groups.append({"id": group_id, "members": len(info.members)})
+        listing = admin.list_groups(timeout=6)
+        groups = [{"id": g.id, "members": len(g.members)}
+                  for g in listing if g.id.startswith("group-")]
         last_groups = sorted(groups, key=lambda g: g["id"])
         return last_groups
     except Exception as exc:
-        # during a broker failure the coordinator may be unavailable and the call will fail
         print(f"read_groups failed: {exc!r}", flush=True)
-        return last_groups # last known state of the groups
+        return last_groups
 
 throughput_history = deque(maxlen=HISTORY_POINTS) # keep the last N throughput samples for the dashboard
 snapshot = {"ts": None} # current state of the system
