@@ -152,7 +152,7 @@ services:
         }
 
         create topic-requests 3 2
-        create topic-orders   1 2
+        create topic-orders   3 2
         create topic-fraud    1 2
         create topic-dlq      1 2
 
