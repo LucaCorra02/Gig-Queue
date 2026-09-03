@@ -42,6 +42,7 @@ def try_dashboard_metadata():
     else:
         print("     no response: inconclusive")
 
+    print("dashboard should NOT be able to write to topic-orders")
     payload = b'{"order_id": "fake-001", "status": "confirmed", "seat": 1}'
     delivered, error = try_produce(conf, "topic-orders", payload=payload)
     if delivered:
