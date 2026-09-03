@@ -156,8 +156,19 @@ services:
         create topic-fraud    1 2
         create topic-dlq      1 2
 
+        echo "Waiting for all brokers to register..."
+        sleep 15
+
+        echo "Rebalancing partition leadership..."
+        kafka-leader-election --bootstrap-server $$BS --admin.config $$CFG \
+          --election-type preferred --all-topic-partitions || true
+
         echo "Cluster topics:"
         kafka-topics --bootstrap-server $$BS --command-config $$CFG --list
+
+        echo "Leadership after rebalance:"
+        kafka-topics --bootstrap-server $$BS --command-config $$CFG --describe \
+          | grep -o "Leader: [0-9]*" | sort | uniq -c
     networks: [ gig-net ]
 
   redis:
